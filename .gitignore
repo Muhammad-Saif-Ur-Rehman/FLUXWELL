@@ -1,0 +1,8 @@
+/testsprite_tests
+
+/temp
+
+/client/.env
+/server/.env
+/client/env_template.txt
+/server/env_template.txt
