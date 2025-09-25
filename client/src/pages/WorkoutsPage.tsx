@@ -686,7 +686,7 @@ const WorkoutsPage: React.FC = () => {
           <nav className="hidden md:flex items-center gap-6 text-sm">
             <Link to="/dashboard" className="text-gray-400 hover:text-white">Dashboard</Link>
             <Link to="/workouts" className="text-[#EB4747] font-semibold">Workouts</Link>
-            <a href="#" className="text-gray-400 hover:text-white">Nutrition</a>
+            <Link to="/nutrition" className="text-gray-400 hover:text-white">Nutrition</Link>
             <Link to="/realtime" className="text-gray-400 hover:text-white">Tracking</Link>
             <Link to="/coach" className="text-gray-400 hover:text-white">Coach</Link>
             <Link to="/progress" className="text-gray-400 hover:text-white">Progress</Link>

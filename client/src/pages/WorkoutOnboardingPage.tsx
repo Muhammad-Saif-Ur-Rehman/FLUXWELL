@@ -392,7 +392,7 @@ const WorkoutOnboardingPage: React.FC = () => {
           <nav className="hidden md:flex items-center gap-6 text-sm">
             <Link to="/dashboard" className="text-gray-400 hover:text-white">Dashboard</Link>
             <Link to="/workouts" className="text-gray-400 hover:text-white">Workouts</Link>
-            <a href="#" className="text-gray-400 hover:text-white">Nutrition</a>
+            <Link to="/nutrition" className="text-gray-400 hover:text-white">Nutrition</Link>
             <a href="#" className="text-gray-400 hover:text-white">Tracking</a>
             <a href="#" className="text-gray-400 hover:text-white">Coach</a>
             <a href="#" className="text-gray-400 hover:text-white">Progress</a>

@@ -14,6 +14,7 @@ import jwt as pyjwt
 from typing import Optional
 from ..models.user import OnboardingUpdateRequest, OnboardingData, OnboardingStep1, OnboardingStep2, UserResponse, SocialAuthData, OnboardingDataResponse, AIAssessmentResult, OnboardingNutrition
 from ..auth.jwt_auth import get_current_user
+from app.models.nutrition_profile import NutritionProfileIn
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -85,6 +86,7 @@ try:
     client.admin.command('ping')
     db = client["fluxwell"]
     users_collection = db["users"]
+    nutrition_profiles_collection = db["nutrition_profiles"]
     logger.info("MongoDB Atlas connected successfully")
 except Exception as e:
     logger.error(f"MongoDB connection failed: {e}")
@@ -555,27 +557,89 @@ async def update_onboarding_nutrition(
 ):
     """Update nutrition onboarding data"""
     try:
-        update_data = {
-            "onboarding.nutrition": nutrition_data.dict(exclude_none=True),
-            "updated_at": datetime.utcnow()
+        allowed_diets = {"Balanced", "Low Carb", "Vegetarian", "Vegan", "Keto", "Paleo", "Custom"}
+        payload = nutrition_data.dict(exclude_none=True)
+        diet = payload.get("diet_type")
+        if diet and isinstance(diet, str) and diet not in allowed_diets and len(diet) > 64:
+            raise HTTPException(status_code=400, detail="Invalid diet_type")
+        if payload.get("meals_per_day") is not None:
+            payload["meals_per_day"] = max(1, min(8, int(payload["meals_per_day"])))
+        if payload.get("snacks_per_day") is not None:
+            payload["snacks_per_day"] = max(0, min(6, int(payload["snacks_per_day"])))
+
+        now = datetime.utcnow()
+        profile_doc = {
+            "diet_type": payload.get("diet_type"),
+            "allergies": payload.get("allergies", []),
+            "disliked_foods": payload.get("disliked_foods"),
+            "favorite_cuisines": payload.get("favorite_cuisines", []),
+            "meals_per_day": payload.get("meals_per_day"),
+            "snacks_per_day": payload.get("snacks_per_day"),
+            "cooking_time_preference": payload.get("cooking_time_preference"),
+            "updated_at": now,
         }
 
-        result = users_collection.update_one(
+        existing_profile = nutrition_profiles_collection.find_one({"user_id": current_user["_id"]})
+        if existing_profile:
+            nutrition_profiles_collection.update_one({"_id": existing_profile["_id"]}, {"$set": profile_doc})
+        else:
+            profile_doc["created_at"] = now
+            profile_doc["user_id"] = current_user["_id"]
+            nutrition_profiles_collection.insert_one(profile_doc)
+
+        users_collection.update_one(
             {"_id": current_user["_id"]},
-            {"$set": update_data}
+            {
+                "$set": {
+                    "onboarding.nutrition": payload,
+                    "onboarding.nutrition_configured": True,
+                    "updated_at": now
+                }
+            }
         )
 
-        if result.modified_count == 0:
-            raise HTTPException(status_code=400, detail="Failed to update nutrition data")
-
-        logger.info(f"Nutrition onboarding data updated for user: {current_user['email']}")
-        return {"success": True, "message": "Nutrition data updated successfully"}
+        saved = nutrition_profiles_collection.find_one({"user_id": current_user["_id"]})
+        return {
+            "success": True,
+            "message": "Nutrition data updated successfully",
+            "nutrition": payload,
+            "nutrition_exists": True,
+            "profile_id": str(saved["_id"])
+        }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Update nutrition error: {e}")
         raise HTTPException(status_code=500, detail="Failed to update nutrition data")
+
+@router.get("/onboarding/nutrition")
+async def get_onboarding_nutrition(current_user=Depends(get_current_user)):
+    """Get only the nutrition onboarding slice for the current user."""
+    try:
+        profile = nutrition_profiles_collection.find_one({"user_id": current_user["_id"]})
+        payload = profile or {}
+        configured = bool(profile)
+        if not payload:
+            user = users_collection.find_one({"_id": current_user["_id"]}, {"onboarding.nutrition": 1, "onboarding.nutrition_configured": 1})
+            onboarding_obj = (user.get("onboarding", {}) or {}) if user else {}
+            payload = onboarding_obj.get("nutrition", {})
+            configured = bool(onboarding_obj.get("nutrition_configured", False))
+        nutrition = {
+            "diet_type": payload.get("diet_type", "Balanced"),
+            "allergies": payload.get("allergies", []),
+            "disliked_foods": payload.get("disliked_foods", ""),
+            "favorite_cuisines": payload.get("favorite_cuisines", []),
+            "meals_per_day": payload.get("meals_per_day"),
+            "snacks_per_day": payload.get("snacks_per_day"),
+            "cooking_time_preference": payload.get("cooking_time_preference"),
+        }
+        return {"nutrition": nutrition, "nutrition_exists": configured}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get nutrition onboarding error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch nutrition data")
 
 @router.post("/onboarding/ai-assessment")
 async def save_ai_assessment(

@@ -7,6 +7,8 @@ import Dashboard from './pages/Dashboard';
 import WorkoutsPage from './pages/WorkoutsPage';
 import OnboardingPage from './pages/OnboardingPage';
 import OnboardingNutritionPage from './pages/NutritionOnboardingPage';
+import NutritionPage from './pages/NutritionPage';
+import NutritionGate from './pages/NutritionGate';
 import WorkoutOnboardingPage from './pages/WorkoutOnboardingPage';
 import ExerciseSearchPage from './pages/ExerciseSearchPage';
 import CreateWorkoutPlanPage from './pages/CreateWorkoutPlanPage';
@@ -34,7 +36,8 @@ function App() {
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/onboarding" element={<OnboardingPage />} />
-        <Route path="/onboarding/nutrition" element={<OnboardingNutritionPage />} />
+        <Route path="/onboarding/nutrition" element={<RequireAuth><OnboardingNutritionPage /></RequireAuth>} />
+        <Route path="/nutrition" element={<RequireAuth><NutritionGate /></RequireAuth>} />
         <Route path="/onboarding/workout" element={<WorkoutOnboardingPage />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/workouts" element={<WorkoutsPage />} />

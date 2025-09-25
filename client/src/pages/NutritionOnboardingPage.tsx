@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { API_ENDPOINTS } from '../config/api';
 import { OnboardingNutritionData } from '../types/onboarding';
@@ -19,9 +19,13 @@ const COOKING_TIME_OPTIONS = ['Quick (15-30m)', 'Moderate (30-60m)', 'Leisurely 
 export default function NutritionOnboardingPage() {
   const navigate = useNavigate();
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-  const authHeaders: Record<string, string> = useMemo(() => (
-    token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' }
-  ), [token]);
+  const authHeaders: Record<string, string> = useMemo(() => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+    return headers;
+  }, [token]);
 
   const [data, setData] = useState<OnboardingNutritionData>({
     dietType: 'Balanced',
@@ -33,10 +37,52 @@ export default function NutritionOnboardingPage() {
     cookingTimePreference: null,
   });
   const [customAllergy, setCustomAllergy] = useState('');
+  const [customAllergyValue, setCustomAllergyValue] = useState('');
   const [customCuisine, setCustomCuisine] = useState('');
+  const [customCuisineValue, setCustomCuisineValue] = useState('');
+  const [customDietInput, setCustomDietInput] = useState('');
+  const [customDietValue, setCustomDietValue] = useState('');
   const [customDietType, setCustomDietType] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [customAllergyActive, setCustomAllergyActive] = useState(false);
+  const [customCuisineActive, setCustomCuisineActive] = useState(false);
+
+  // Prefill from backend if exists
+  useEffect(() => {
+    const prefill = async () => {
+      try {
+        if (!token) return;
+        const resp = await fetch(API_ENDPOINTS.AUTH.ONBOARDING_NUTRITION_GET, { headers: { Authorization: `Bearer ${token}` } });
+        if (!resp.ok) return;
+        const json = await resp.json();
+        const n = json?.nutrition || {};
+        const backendDiet = typeof n.diet_type === 'string' ? n.diet_type : '';
+        const isCustomDiet = backendDiet && !DIET_TYPES.includes(backendDiet);
+        setData(prev => ({
+          dietType: isCustomDiet ? 'Custom' : (backendDiet || prev.dietType),
+          allergies: Array.isArray(n.allergies) ? n.allergies.filter(item => ALLERGY_PRESETS.includes(item)) : prev.allergies,
+          dislikedFoods: typeof n.disliked_foods === 'string' ? n.disliked_foods : prev.dislikedFoods,
+          favoriteCuisines: Array.isArray(n.favorite_cuisines) ? n.favorite_cuisines.filter(item => CUISINE_OPTIONS.includes(item)) : prev.favoriteCuisines,
+          mealsPerDay: typeof n.meals_per_day === 'number' ? n.meals_per_day : prev.mealsPerDay,
+          snacksPerDay: typeof n.snacks_per_day === 'number' ? n.snacks_per_day : prev.snacksPerDay,
+          cookingTimePreference: n.cooking_time_preference || prev.cookingTimePreference,
+        }));
+        setCustomDietInput(isCustomDiet ? backendDiet : '');
+        setCustomDietValue(isCustomDiet ? backendDiet : '');
+        setCustomDietType(isCustomDiet ? backendDiet : '');
+        const customAll = Array.isArray(n.allergies) ? n.allergies.find(a => !ALLERGY_PRESETS.includes(a)) : '';
+        setCustomAllergyValue(customAll || '');
+        setCustomAllergy(customAll || '');
+        setCustomAllergyActive(Boolean(customAll));
+        const customCuisinePrefill = Array.isArray(n.favorite_cuisines) ? n.favorite_cuisines.find(c => !CUISINE_OPTIONS.includes(c)) : '';
+        setCustomCuisineValue(customCuisinePrefill || '');
+        setCustomCuisine(customCuisinePrefill || '');
+        setCustomCuisineActive(Boolean(customCuisinePrefill));
+      } catch {}
+    };
+    prefill();
+  }, [token]);
 
   const handleLogout = () => {
     localStorage.removeItem('access_token');
@@ -49,9 +95,31 @@ export default function NutritionOnboardingPage() {
   };
 
   const toggleChip = (key: 'allergies' | 'favoriteCuisines', value: string) => {
+    const isCustomChip = value === 'Custom';
+    if (key === 'allergies' && isCustomChip) {
+      const newState = !customAllergyActive;
+      setCustomAllergyActive(newState);
+      if (!newState) {
+        setCustomAllergy('');
+        setCustomAllergyValue('');
+      }
+      return;
+    }
+    if (key === 'favoriteCuisines' && isCustomChip) {
+      const newState = !customCuisineActive;
+      setCustomCuisineActive(newState);
+      if (!newState) {
+        setCustomCuisine('');
+        setCustomCuisineValue('');
+      }
+      return;
+    }
     setData(prev => {
       const exists = prev[key].includes(value);
-      return { ...prev, [key]: exists ? prev[key].filter(v => v !== value) : [...prev[key], value] };
+      return {
+        ...prev,
+        [key]: exists ? prev[key].filter(v => v !== value) : [...prev[key], value]
+      };
     });
   };
 
@@ -63,11 +131,23 @@ export default function NutritionOnboardingPage() {
         navigate('/login');
         return;
       }
+      const resolvedDiet = data.dietType === 'Custom' ? customDietValue.trim() : data.dietType;
+      if (data.dietType === 'Custom' && !resolvedDiet) {
+        setError('Please specify your custom diet type.');
+        setIsSaving(false);
+        return;
+      }
       const payload = {
-        diet_type: data.dietType,
-        allergies: data.allergies,
+        diet_type: resolvedDiet,
+        allergies: [
+          ...data.allergies.filter(item => item && item.trim()),
+          ...(customAllergyValue ? [customAllergyValue] : [])
+        ],
         disliked_foods: data.dislikedFoods,
-        favorite_cuisines: data.favoriteCuisines,
+        favorite_cuisines: [
+          ...data.favoriteCuisines.filter(item => item && item.trim()),
+          ...(customCuisineValue ? [customCuisineValue] : [])
+        ],
         meals_per_day: data.mealsPerDay,
         snacks_per_day: data.snacksPerDay,
         cooking_time_preference: data.cookingTimePreference,
@@ -81,7 +161,9 @@ export default function NutritionOnboardingPage() {
         const txt = await resp.text();
         throw new Error(txt || 'Failed to save');
       }
-      navigate('/dashboard', { replace: true });
+      const json = await resp.json();
+      localStorage.setItem('nutrition_profile_configured', 'true');
+      navigate('/nutrition', { replace: true, state: { fromOnboarding: true, nutritionExists: json?.nutrition_exists ?? true } });
     } catch (e: any) {
       setError(e?.message || 'Failed to save');
     } finally {
@@ -104,7 +186,7 @@ export default function NutritionOnboardingPage() {
           <nav className="hidden md:flex items-center gap-6 text-sm">
             <Link to="/dashboard" className="text-[#EB4747] font-semibold">Dashboard</Link>
             <Link to="/workouts" className="text-gray-400 hover:text-white">Workouts</Link>
-            <a href="#" className="text-gray-400 hover:text-white">Nutrition</a>
+            <Link to="/nutrition" className="text-gray-400 hover:text-white">Nutrition</Link>
             <Link to="/realtime" className="text-gray-400 hover:text-white">Tracking</Link>
             <Link to="/coach" className="text-gray-400 hover:text-white">Coach</Link>
             <Link to="/progress" className="text-gray-400 hover:text-white">Progress</Link>
@@ -138,7 +220,7 @@ export default function NutritionOnboardingPage() {
               <div className="text-sm font-medium mb-2">Diet Type</div>
               <div className="flex flex-wrap gap-2 sm:gap-3">
                 {DIET_TYPES.map(opt => {
-                  const selected = data.dietType === opt;
+                  const selected = data.dietType === opt || (opt === 'Custom' && data.dietType === 'Custom');
                   return (
                     <button
                       key={opt}
@@ -146,8 +228,10 @@ export default function NutritionOnboardingPage() {
                       onClick={() => {
                         if (opt === 'Custom') {
                           setData(prev => ({ ...prev, dietType: 'Custom' }));
+                          setCustomDietType(prev => prev || customDietValue || '');
                         } else {
                           setData(prev => ({ ...prev, dietType: opt }));
+                          setCustomDietValue('');
                           setCustomDietType('');
                         }
                       }}
@@ -163,21 +247,20 @@ export default function NutritionOnboardingPage() {
                 <div className="mt-3 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                   <input
                     value={customDietType}
-                    onChange={e => setCustomDietType(e.target.value)}
+                    onChange={e => {
+                      const value = e.target.value;
+                      setCustomDietType(value);
+                      setCustomDietValue(value);
+                    }}
+                    onBlur={() => {
+                      const value = customDietType.trim();
+                      if (!value) {
+                        setData(prev => ({ ...prev, dietType: 'Balanced' }));
+                      }
+                    }}
                     placeholder="Specify custom diet type"
                     className="flex-1 bg-black/20 border border-white/20 focus:border-[#EB4747] focus:ring-2 focus:ring-[#EB4747]/20 outline-none rounded-xl px-3 py-2 text-sm"
                   />
-                  <button
-                    type="button"
-                    className="px-4 py-2 rounded-xl bg-[#EB4747] hover:bg-[#d13f3f] text-sm font-medium"
-                    onClick={() => {
-                      const v = customDietType.trim();
-                      if (v) {
-                        setData(prev => ({ ...prev, dietType: v }));
-                        setCustomDietType('');
-                      }
-                    }}
-                  >Add</button>
                 </div>
               )}
             </div>
@@ -187,7 +270,7 @@ export default function NutritionOnboardingPage() {
               <div className="text-sm font-medium mb-2">Allergies</div>
               <div className="flex flex-wrap gap-2 sm:gap-3">
                 {ALLERGY_PRESETS.map(a => {
-                  const selected = data.allergies.includes(a);
+                  const selected = a === 'Custom' ? customAllergyActive : data.allergies.includes(a);
                   return (
                     <button
                       key={a}
@@ -201,25 +284,18 @@ export default function NutritionOnboardingPage() {
                   );
                 })}
               </div>
-              {data.allergies.includes('Custom') && (
+              {customAllergyActive && (
                 <div className="mt-3 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                   <input
                     value={customAllergy}
-                    onChange={e => setCustomAllergy(e.target.value)}
+                    onChange={e => {
+                      const raw = e.target.value;
+                      setCustomAllergy(raw);
+                      setCustomAllergyValue(raw.trim());
+                    }}
                     placeholder="Specify custom allergy"
                     className="flex-1 bg-black/20 border border-white/20 focus:border-[#EB4747] focus:ring-2 focus:ring-[#EB4747]/20 outline-none rounded-xl px-3 py-2 text-sm"
                   />
-                  <button
-                    type="button"
-                    className="px-4 py-2 rounded-xl bg-[#EB4747] hover:bg-[#d13f3f] text-sm font-medium"
-                    onClick={() => {
-                      const v = customAllergy.trim();
-                      if (v && !data.allergies.includes(v)) {
-                        setData(prev => ({ ...prev, allergies: [...prev.allergies.filter(x => x !== 'Custom'), v] }));
-                        setCustomAllergy('');
-                      }
-                    }}
-                  >Add</button>
                 </div>
               )}
             </div>
@@ -250,7 +326,7 @@ export default function NutritionOnboardingPage() {
               <div className="text-sm font-medium mb-2">Favorite Cuisines</div>
               <div className="flex flex-wrap gap-2 sm:gap-3">
                 {CUISINE_OPTIONS.map(opt => {
-                  const selected = data.favoriteCuisines.includes(opt);
+                  const selected = opt === 'Custom' ? customCuisineActive : data.favoriteCuisines.includes(opt);
                   return (
                     <button
                       key={opt}
@@ -264,25 +340,18 @@ export default function NutritionOnboardingPage() {
                   );
                 })}
               </div>
-              {data.favoriteCuisines.includes('Custom') && (
+              {customCuisineActive && (
                 <div className="mt-3 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                   <input
                     value={customCuisine}
-                    onChange={e => setCustomCuisine(e.target.value)}
+                    onChange={e => {
+                      const raw = e.target.value;
+                      setCustomCuisine(raw);
+                      setCustomCuisineValue(raw.trim());
+                    }}
                     placeholder="Specify custom cuisine"
                     className="flex-1 bg-black/20 border border-white/20 focus:border-[#EB4747] focus:ring-2 focus:ring-[#EB4747]/20 outline-none rounded-xl px-3 py-2 text-sm"
                   />
-                  <button
-                    type="button"
-                    className="px-4 py-2 rounded-xl bg-[#EB4747] hover:bg-[#d13f3f] text-sm font-medium"
-                    onClick={() => {
-                      const v = customCuisine.trim();
-                      if (v && !data.favoriteCuisines.includes(v)) {
-                        setData(prev => ({ ...prev, favoriteCuisines: [...prev.favoriteCuisines.filter(x => x !== 'Custom'), v] }));
-                        setCustomCuisine('');
-                      }
-                    }}
-                  >Add</button>
                 </div>
               )}
             </div>
