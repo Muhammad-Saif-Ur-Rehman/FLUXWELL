@@ -78,7 +78,7 @@ from app.auth.jwt_auth import get_current_user_id
 
 # Init Groq client and model
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama3.1-8b-instant")
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 # Init MCP clients (URLs configurable via env)

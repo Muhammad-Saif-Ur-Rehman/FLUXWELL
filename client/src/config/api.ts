@@ -1,5 +1,5 @@
 // API Configuration
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+export const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:8000';
 
 export const API_ENDPOINTS = {
   AUTH: {
@@ -51,6 +51,8 @@ export const API_ENDPOINTS = {
     // Enhanced Progress Endpoints
     DASHBOARD: `${API_BASE_URL}/api/progress/dashboard`,
     BADGES_ENHANCED: `${API_BASE_URL}/api/progress/badges/enhanced`,
+    BADGES_CHECK: `${API_BASE_URL}/api/progress/badges/check`,
+    BADGES_INITIALIZE: `${API_BASE_URL}/api/progress/badges/initialize`,
     
     // Nutrition
     CALORIES: `${API_BASE_URL}/api/progress/nutrition/calories`,
@@ -81,6 +83,8 @@ export const API_ENDPOINTS = {
     MEAL: (mealId: string) => `${API_BASE_URL}/nutrition/meals/${mealId}`,
     WATER_ADD: `${API_BASE_URL}/nutrition/water`,
     WATER_TODAY: `${API_BASE_URL}/nutrition/water/today`,
+    STREAK: `${API_BASE_URL}/nutrition/streak`,
+    ACTIVITY: `${API_BASE_URL}/nutrition/activity`,
     MACROS: `${API_BASE_URL}/nutrition/macros`,
     GROCERY_LIST: `${API_BASE_URL}/nutrition/grocery-list`,
     GROCERY_EXPORT: `${API_BASE_URL}/nutrition/grocery-list/export`,
@@ -88,8 +92,18 @@ export const API_ENDPOINTS = {
     GENERATE_RECIPE: `${API_BASE_URL}/nutrition/generate-recipe`,
     COMPLIANCE_TODAY: `${API_BASE_URL}/nutrition/compliance/today`,
     AGENT_RUN: `${API_BASE_URL}/nutrition/agent/run`,
+    AGENT_PLAN: `${API_BASE_URL}/nutrition/agent/plan`,
+    AGENT_REFRESH: `${API_BASE_URL}/nutrition/agent/refresh`,
+    AGENT_SWAP: `${API_BASE_URL}/nutrition/agent/swap`,
+    AGENT_AUTO_GENERATE: `${API_BASE_URL}/nutrition/agent/auto-generate`,
+    AGENT_SAVE: `${API_BASE_URL}/nutrition/agent/save`,
     HEALTH: `${API_BASE_URL}/nutrition/health`,
     PROFILE: `${API_BASE_URL}/nutrition/profile`,
+  },
+  REALTIME: {
+    METRICS: `${API_BASE_URL}/api/realtime/metrics`,
+    STATUS: `${API_BASE_URL}/api/realtime/status`,
+    HEALTH: `${API_BASE_URL}/api/realtime/health`,
   },
   EXERCISES: `${API_BASE_URL}/exercises`,
   

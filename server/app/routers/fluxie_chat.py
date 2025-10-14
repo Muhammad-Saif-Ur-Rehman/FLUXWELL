@@ -137,12 +137,12 @@ No high-quality matches found in our knowledge base (all similarity scores < 0.6
     
     try:
         resp = await groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="meta-llama/llama-4-maverick-17b-128e-instruct",
             messages=[
                 {"role": "system", "content": system_msg},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7,
+            temperature=0.4,
             max_tokens=1024,
             top_p=0.9
         )

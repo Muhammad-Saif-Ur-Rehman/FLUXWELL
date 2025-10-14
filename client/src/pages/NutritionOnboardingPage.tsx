@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { API_ENDPOINTS } from '../config/api';
 import { OnboardingNutritionData } from '../types/onboarding';
@@ -53,17 +53,17 @@ export default function NutritionOnboardingPage() {
     const prefill = async () => {
       try {
         if (!token) return;
-        const resp = await fetch(API_ENDPOINTS.AUTH.ONBOARDING_NUTRITION_GET, { headers: { Authorization: `Bearer ${token}` } });
+        const resp = await fetch(API_ENDPOINTS.NUTRITION.PROFILE, { headers: { Authorization: `Bearer ${token}` } });
         if (!resp.ok) return;
         const json = await resp.json();
-        const n = json?.nutrition || {};
+        const n = json || {};
         const backendDiet = typeof n.diet_type === 'string' ? n.diet_type : '';
         const isCustomDiet = backendDiet && !DIET_TYPES.includes(backendDiet);
         setData(prev => ({
           dietType: isCustomDiet ? 'Custom' : (backendDiet || prev.dietType),
-          allergies: Array.isArray(n.allergies) ? n.allergies.filter(item => ALLERGY_PRESETS.includes(item)) : prev.allergies,
+          allergies: Array.isArray(n.allergies) ? n.allergies.filter((item: string) => ALLERGY_PRESETS.includes(item)) : prev.allergies,
           dislikedFoods: typeof n.disliked_foods === 'string' ? n.disliked_foods : prev.dislikedFoods,
-          favoriteCuisines: Array.isArray(n.favorite_cuisines) ? n.favorite_cuisines.filter(item => CUISINE_OPTIONS.includes(item)) : prev.favoriteCuisines,
+          favoriteCuisines: Array.isArray(n.favorite_cuisines) ? n.favorite_cuisines.filter((item: string) => CUISINE_OPTIONS.includes(item)) : prev.favoriteCuisines,
           mealsPerDay: typeof n.meals_per_day === 'number' ? n.meals_per_day : prev.mealsPerDay,
           snacksPerDay: typeof n.snacks_per_day === 'number' ? n.snacks_per_day : prev.snacksPerDay,
           cookingTimePreference: n.cooking_time_preference || prev.cookingTimePreference,
@@ -71,20 +71,22 @@ export default function NutritionOnboardingPage() {
         setCustomDietInput(isCustomDiet ? backendDiet : '');
         setCustomDietValue(isCustomDiet ? backendDiet : '');
         setCustomDietType(isCustomDiet ? backendDiet : '');
-        const customAll = Array.isArray(n.allergies) ? n.allergies.find(a => !ALLERGY_PRESETS.includes(a)) : '';
+        const customAll = Array.isArray(n.allergies) ? n.allergies.find((a: string) => !ALLERGY_PRESETS.includes(a)) : '';
         setCustomAllergyValue(customAll || '');
         setCustomAllergy(customAll || '');
         setCustomAllergyActive(Boolean(customAll));
-        const customCuisinePrefill = Array.isArray(n.favorite_cuisines) ? n.favorite_cuisines.find(c => !CUISINE_OPTIONS.includes(c)) : '';
+        const customCuisinePrefill = Array.isArray(n.favorite_cuisines) ? n.favorite_cuisines.find((c: string) => !CUISINE_OPTIONS.includes(c)) : '';
         setCustomCuisineValue(customCuisinePrefill || '');
         setCustomCuisine(customCuisinePrefill || '');
         setCustomCuisineActive(Boolean(customCuisinePrefill));
-      } catch {}
+      } catch (error) {
+        console.error('Failed to prefill nutrition data:', error);
+      }
     };
     prefill();
   }, [token]);
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     localStorage.removeItem('access_token');
     localStorage.removeItem('user');
     localStorage.removeItem('onboarding_completed');
@@ -92,9 +94,9 @@ export default function NutritionOnboardingPage() {
     localStorage.removeItem('onboarding_step2');
     localStorage.removeItem('onboarding_data');
     navigate('/');
-  };
+  }, [navigate]);
 
-  const toggleChip = (key: 'allergies' | 'favoriteCuisines', value: string) => {
+  const toggleChip = useCallback((key: 'allergies' | 'favoriteCuisines', value: string) => {
     const isCustomChip = value === 'Custom';
     if (key === 'allergies' && isCustomChip) {
       const newState = !customAllergyActive;
@@ -121,7 +123,7 @@ export default function NutritionOnboardingPage() {
         [key]: exists ? prev[key].filter(v => v !== value) : [...prev[key], value]
       };
     });
-  };
+  }, [customAllergyActive, customCuisineActive, data.allergies, data.favoriteCuisines]);
 
   const onSave = async () => {
     try {
@@ -152,8 +154,8 @@ export default function NutritionOnboardingPage() {
         snacks_per_day: data.snacksPerDay,
         cooking_time_preference: data.cookingTimePreference,
       };
-      const resp = await fetch(API_ENDPOINTS.AUTH.ONBOARDING_NUTRITION_UPDATE, {
-        method: 'PUT',
+      const resp = await fetch(API_ENDPOINTS.NUTRITION.PROFILE, {
+        method: 'POST',
         headers: authHeaders,
         body: JSON.stringify(payload),
       });
@@ -163,9 +165,11 @@ export default function NutritionOnboardingPage() {
       }
       const json = await resp.json();
       localStorage.setItem('nutrition_profile_configured', 'true');
-      navigate('/nutrition', { replace: true, state: { fromOnboarding: true, nutritionExists: json?.nutrition_exists ?? true } });
-    } catch (e: any) {
-      setError(e?.message || 'Failed to save');
+      navigate('/nutrition', { replace: true, state: { fromOnboarding: true, nutritionExists: true } });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to save';
+      setError(errorMessage);
+      console.error('Failed to save nutrition data:', error);
     } finally {
       setIsSaving(false);
     }
@@ -201,7 +205,7 @@ export default function NutritionOnboardingPage() {
         </div>
       </header>
 
-      <div className="max-w-[1440px] mx-auto px-6 md:px-10 lg:px-20 xl:px-28 pt-[88px] md:pt-[96px] py-8 md:py-12">
+      <main className="max-w-[1440px] mx-auto px-6 md:px-10 lg:px-20 xl:px-28 pt-[88px] md:pt-[96px] py-8 md:py-12">
         {/* Intro */}
         <div className="mb-8 md:mb-12">
           <h2 className="text-2xl sm:text-3xl font-extrabold leading-tight">Personalize Your Nutrition Plan</h2>
@@ -214,7 +218,7 @@ export default function NutritionOnboardingPage() {
             <h3 className="text-base sm:text-lg font-bold">Dietary Preferences</h3>
             <p className="text-sm text-white/70">Choose your diet type, allergies, and dislikes.</p>
           </div>
-          <div className="space-y-6">
+          <fieldset className="space-y-6">
             {/* Diet Type */}
             <div>
               <div className="text-sm font-medium mb-2">Diet Type</div>
@@ -260,6 +264,8 @@ export default function NutritionOnboardingPage() {
                     }}
                     placeholder="Specify custom diet type"
                     className="flex-1 bg-black/20 border border-white/20 focus:border-[#EB4747] focus:ring-2 focus:ring-[#EB4747]/20 outline-none rounded-xl px-3 py-2 text-sm"
+                    aria-label="Custom diet type input"
+                    autoComplete="off"
                   />
                 </div>
               )}
@@ -295,6 +301,8 @@ export default function NutritionOnboardingPage() {
                     }}
                     placeholder="Specify custom allergy"
                     className="flex-1 bg-black/20 border border-white/20 focus:border-[#EB4747] focus:ring-2 focus:ring-[#EB4747]/20 outline-none rounded-xl px-3 py-2 text-sm"
+                    aria-label="Custom allergy input"
+                    autoComplete="off"
                   />
                 </div>
               )}
@@ -308,9 +316,11 @@ export default function NutritionOnboardingPage() {
                 onChange={e => setData(prev => ({ ...prev, dislikedFoods: e.target.value }))}
                 placeholder="e.g., cilantro, mushrooms, olives"
                 className="w-full min-h-[100px] sm:min-h-[120px] bg-white/5 border border-white/20 rounded-2xl p-3 text-sm"
+                aria-label="Disliked foods input"
+                rows={4}
               />
             </div>
-          </div>
+          </fieldset>
         </section>
 
         <div className="h-px bg-white/10 my-6 md:my-8" />
@@ -321,7 +331,7 @@ export default function NutritionOnboardingPage() {
             <h3 className="text-base sm:text-lg font-bold">Cuisine Preferences</h3>
             <p className="text-sm text-white/70">Select the cuisines you enjoy.</p>
           </div>
-          <div className="space-y-6">
+          <fieldset className="space-y-6">
             <div>
               <div className="text-sm font-medium mb-2">Favorite Cuisines</div>
               <div className="flex flex-wrap gap-2 sm:gap-3">
@@ -351,11 +361,13 @@ export default function NutritionOnboardingPage() {
                     }}
                     placeholder="Specify custom cuisine"
                     className="flex-1 bg-black/20 border border-white/20 focus:border-[#EB4747] focus:ring-2 focus:ring-[#EB4747]/20 outline-none rounded-xl px-3 py-2 text-sm"
+                    aria-label="Custom cuisine input"
+                    autoComplete="off"
                   />
                 </div>
               )}
             </div>
-          </div>
+          </fieldset>
         </section>
 
         <div className="h-px bg-white/10 my-6 md:my-8" />
@@ -366,20 +378,22 @@ export default function NutritionOnboardingPage() {
             <h3 className="text-base sm:text-lg font-bold">Meal Structure</h3>
             <p className="text-sm text-white/70">Define your daily meal and snack routine.</p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+          <fieldset className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
             <div>
               <div className="text-sm font-medium mb-2">Meals per day</div>
               <div className="flex items-center gap-2 sm:gap-3 bg-white/5 border border-white/20 rounded-2xl px-3 py-2 sm:px-4 sm:py-2">
                 <button
                   type="button"
                   className="text-white/80 px-2 py-1 sm:px-3 sm:py-1.5 rounded-md hover:bg-white/10"
-                  onClick={() => setData(prev => ({ ...prev, mealsPerDay: Math.max(1, (prev.mealsPerDay || 1) - 1) }))}
+                  onClick={() => setData(prev => ({ ...prev, mealsPerDay: Math.max(1, (prev.mealsPerDay || 3) - 1) }))}
+                  aria-label="Decrease meals per day"
                 >−</button>
-                <div className="flex-1 text-center text-base sm:text-lg font-semibold">{data.mealsPerDay ?? 3}</div>
+                <div className="flex-1 text-center text-base sm:text-lg font-semibold">{data.mealsPerDay || 3}</div>
                 <button
                   type="button"
                   className="text-white/80 px-2 py-1 sm:px-3 sm:py-1.5 rounded-md hover:bg-white/10"
                   onClick={() => setData(prev => ({ ...prev, mealsPerDay: Math.min(8, (prev.mealsPerDay || 3) + 1) }))}
+                  aria-label="Increase meals per day"
                 >+</button>
               </div>
             </div>
@@ -389,17 +403,19 @@ export default function NutritionOnboardingPage() {
                 <button
                   type="button"
                   className="text-white/80 px-2 py-1 sm:px-3 sm:py-1.5 rounded-md hover:bg-white/10"
-                  onClick={() => setData(prev => ({ ...prev, snacksPerDay: Math.max(0, (prev.snacksPerDay || 0) - 1) }))}
+                  onClick={() => setData(prev => ({ ...prev, snacksPerDay: Math.max(0, (prev.snacksPerDay || 2) - 1) }))}
+                  aria-label="Decrease snacks per day"
                 >−</button>
-                <div className="flex-1 text-center text-base sm:text-lg font-semibold">{data.snacksPerDay ?? 2}</div>
+                <div className="flex-1 text-center text-base sm:text-lg font-semibold">{data.snacksPerDay || 2}</div>
                 <button
                   type="button"
                   className="text-white/80 px-2 py-1 sm:px-3 sm:py-1.5 rounded-md hover:bg-white/10"
                   onClick={() => setData(prev => ({ ...prev, snacksPerDay: Math.min(6, (prev.snacksPerDay || 2) + 1) }))}
+                  aria-label="Increase snacks per day"
                 >+</button>
               </div>
             </div>
-          </div>
+          </fieldset>
         </section>
 
         <div className="h-px bg-white/10 my-6 md:my-8" />
@@ -410,7 +426,7 @@ export default function NutritionOnboardingPage() {
             <h3 className="text-base sm:text-lg font-bold">Other Preferences</h3>
             <p className="text-sm text-white/70">Additional preferences to fine-tune your plan.</p>
           </div>
-          <div>
+          <fieldset>
             <div className="text-sm font-medium mb-2">Cooking Time</div>
             <div className="flex flex-wrap gap-2 sm:gap-3">
               {COOKING_TIME_OPTIONS.map(opt => (
@@ -425,7 +441,7 @@ export default function NutritionOnboardingPage() {
                 >{opt}</button>
               ))}
             </div>
-          </div>
+          </fieldset>
         </section>
 
         {error && (
@@ -443,7 +459,7 @@ export default function NutritionOnboardingPage() {
             }
           >{isSaving ? 'Saving...' : 'Save & Continue'}</button>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

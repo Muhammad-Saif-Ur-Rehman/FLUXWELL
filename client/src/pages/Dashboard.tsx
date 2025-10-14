@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { API_ENDPOINTS } from '../config/api';
 import logoIcon from '../assets/images/logo-icon.svg';
+import { dashboardService, type DashboardMetrics, type StreakData, type MacrosToday, type RealtimeData, type WorkoutSummary } from '../services/dashboardService';
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -18,6 +19,14 @@ const Dashboard: React.FC = () => {
   const [onboardingStep1, setOnboardingStep1] = useState<{ height?: string; weight?: string; date_of_birth?: string; gender?: string; profile_picture_url?: string } | null>(null);
   const [onboardingStep2, setOnboardingStep2] = useState<{ fitness_goals?: string[]; activity_level?: string } | null>(null);
   const [showAssessmentModal, setShowAssessmentModal] = useState(false);
+  
+  // Dashboard data state
+  const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetrics | null>(null);
+  const [streakData, setStreakData] = useState<StreakData | null>(null);
+  const [macrosToday, setMacrosToday] = useState<MacrosToday | null>(null);
+  const [realtimeData, setRealtimeData] = useState<RealtimeData | null>(null);
+  const [workoutSummary, setWorkoutSummary] = useState<WorkoutSummary | null>(null);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
 
   // Helpers: parsing and calculations
   const parseHeightToMeters = (heightStr?: string | null): number | null => {
@@ -123,6 +132,23 @@ const Dashboard: React.FC = () => {
     };
   }, [onboardingStep1, onboardingStep2, user]);
 
+  // Load dashboard data function
+  const loadDashboardData = async () => {
+    setDashboardLoading(true);
+    try {
+      const data = await dashboardService.getAllDashboardData();
+      setDashboardMetrics(data.metrics);
+      setStreakData(data.streak);
+      setMacrosToday(data.macros);
+      setRealtimeData(data.realtime);
+      setWorkoutSummary(data.workout);
+    } catch (error) {
+      console.error('Failed to load dashboard data:', error);
+    } finally {
+      setDashboardLoading(false);
+    }
+  };
+
   useEffect(() => {
     const checkAuth = async () => {
       const loadOnboardingData = async (token: string, currentUser: any) => {
@@ -161,6 +187,10 @@ const Dashboard: React.FC = () => {
             // Clear URL parameters
             window.history.replaceState({}, document.title, '/dashboard');
             await loadOnboardingData(urlToken, userData);
+            
+            // Load dashboard data
+            await loadDashboardData();
+            
             setIsLoading(false);
             return;
           }
@@ -188,6 +218,10 @@ const Dashboard: React.FC = () => {
         if (localOnboardingCompleted === 'true') {
           console.log('Local storage shows onboarding completed, proceeding to dashboard');
           await loadOnboardingData(accessToken, parsedUser);
+          
+          // Load dashboard data
+          await loadDashboardData();
+          
           setIsLoading(false);
           return;
         }
@@ -220,6 +254,9 @@ const Dashboard: React.FC = () => {
         console.log('Dashboard access granted - onboarding completed');
         setUser(backendUserData);
         await loadOnboardingData(accessToken, backendUserData);
+        
+        // Load dashboard data
+        await loadDashboardData();
         
         setIsLoading(false);
       } catch (error) {
@@ -337,17 +374,19 @@ const Dashboard: React.FC = () => {
           {/* Workout Summary */}
           <section className="bg-[#1E1E1E] rounded-2xl p-6 shadow-[0_4px_6px_-4px_rgba(0,0,0,0.1),0_10px_15px_-3px_rgba(0,0,0,0.1)]">
             <h3 className="text-[20px] font-bold mb-1">Workout Summary</h3>
-            <p className="text-sm text-gray-400 mb-3">4 of 5 workouts completed this week.</p>
+            <p className="text-sm text-gray-400 mb-3">
+              {workoutSummary ? `${workoutSummary.workouts_completed_this_week} of ${workoutSummary.workouts_total_this_week || 5} workouts completed this week.` : 'Loading...'}
+            </p>
             <div className="rounded-lg bg-black/20 p-4 mb-4">
               <div className="grid grid-cols-7 gap-2 text-center text-xs text-gray-400 mb-2">
                 <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
               </div>
-              <div className="grid grid-cols-12 gap-2">
-                {Array.from({ length: 12 }).map((_, idx) => {
-                  const day = idx + 1;
-                  const isCompleted = day <= 4;
+              <div className="grid grid-cols-7 gap-2">
+                {Array.from({ length: 7 }).map((_, idx) => {
+                  const isCompleted = workoutSummary?.completion_days?.includes(idx) || false;
+                  const dayNames = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
                   return (
-                    <div key={day} className={`h-8 rounded-full flex items-center justify-center text-sm ${isCompleted ? 'bg-green-500/50 text-white' : 'bg-white/10 text-white'}`}>{day}</div>
+                    <div key={idx} className={`h-8 rounded-full flex items-center justify-center text-sm ${isCompleted ? 'bg-green-500/50 text-white' : 'bg-white/10 text-white/50'}`}>{dayNames[idx]}</div>
                   );
                 })}
               </div>
@@ -362,33 +401,37 @@ const Dashboard: React.FC = () => {
               <div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="font-semibold">Protein</span>
-                  <span className="text-gray-400">120g / 150g</span>
+                  <span className="text-gray-400">{macrosToday ? `${Math.round(macrosToday.protein_consumed)}g / ${Math.round(macrosToday.protein_target)}g` : '—'}</span>
                 </div>
                 <div className="h-2 rounded-full bg-[#374151]">
-                  <div className="h-2 rounded-full bg-[#3B82F6] w-[80%]"></div>
+                  <div className="h-2 rounded-full bg-[#3B82F6]" style={{ width: `${macrosToday && macrosToday.protein_target > 0 ? Math.min((macrosToday.protein_consumed / macrosToday.protein_target) * 100, 100) : 0}%` }}></div>
                 </div>
               </div>
               <div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="font-semibold">Carbs</span>
-                  <span className="text-gray-400">200g / 250g</span>
+                  <span className="text-gray-400">{macrosToday ? `${Math.round(macrosToday.carbs_consumed)}g / ${Math.round(macrosToday.carbs_target)}g` : '—'}</span>
                 </div>
                 <div className="h-2 rounded-full bg-[#374151]">
-                  <div className="h-2 rounded-full bg-[#22C55E] w-[80%]"></div>
+                  <div className="h-2 rounded-full bg-[#22C55E]" style={{ width: `${macrosToday && macrosToday.carbs_target > 0 ? Math.min((macrosToday.carbs_consumed / macrosToday.carbs_target) * 100, 100) : 0}%` }}></div>
                 </div>
               </div>
               <div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="font-semibold">Fats</span>
-                  <span className="text-gray-400">60g / 70g</span>
+                  <span className="text-gray-400">{macrosToday ? `${Math.round(macrosToday.fats_consumed)}g / ${Math.round(macrosToday.fats_target)}g` : '—'}</span>
                 </div>
                 <div className="h-2 rounded-full bg-[#374151]">
-                  <div className="h-2 rounded-full bg-[#EAB308] w-[86%]"></div>
+                  <div className="h-2 rounded-full bg-[#EAB308]" style={{ width: `${macrosToday && macrosToday.fats_target > 0 ? Math.min((macrosToday.fats_consumed / macrosToday.fats_target) * 100, 100) : 0}%` }}></div>
                 </div>
               </div>
-              <p className="text-sm text-gray-400">Last meal: Chicken Salad (350 cal) - 2 hours ago</p>
+              <p className="text-sm text-gray-400">
+                {macrosToday?.last_meal 
+                  ? `Last meal: ${macrosToday.last_meal.name} (${macrosToday.last_meal.calories} cal) - ${new Date(macrosToday.last_meal.logged_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}`
+                  : 'No meals logged today'}
+              </p>
             </div>
-            <button className="w-full h-12 mt-4 rounded-lg border border-white/30 text-gray-200 hover:bg-white/10 font-bold">Go to Nutrition</button>
+            <button onClick={() => navigate('/nutrition')} className="w-full h-12 mt-4 rounded-lg border border-white/30 text-gray-200 hover:bg-white/10 font-bold">Go to Nutrition</button>
           </section>
 
           {/* Realtime Tracking */}
@@ -397,23 +440,29 @@ const Dashboard: React.FC = () => {
             <div className="grid grid-cols-3 gap-4 text-center">
               <div>
                 <div className="text-3xl">👟</div>
-                <div className="text-lg font-extrabold">8,500</div>
+                <div className="text-lg font-extrabold">{realtimeData ? realtimeData.steps.toLocaleString() : '—'}</div>
                 <div className="text-xs text-gray-400">Steps</div>
               </div>
               <div>
                 <div className="text-3xl">😴</div>
-                <div className="text-lg font-extrabold">7.5h</div>
+                <div className="text-lg font-extrabold">{realtimeData ? `${realtimeData.sleep_hours.toFixed(1)}h` : '—'}</div>
                 <div className="text-xs text-gray-400">Sleep</div>
               </div>
               <div>
                 <div className="text-3xl">❤️</div>
-                <div className="text-lg font-extrabold">72</div>
+                <div className="text-lg font-extrabold">{realtimeData ? realtimeData.heart_rate : '—'}</div>
                 <div className="text-xs text-gray-400">bpm</div>
               </div>
             </div>
             <div className="mt-4 space-y-3">
-              <button className="w-full text-sm text-gray-300">🔄 Sync Now</button>
-              <button className="w-full h-12 rounded-lg border border-white/30 text-gray-200 hover:bg-white/10 font-bold">Go to Tracking</button>
+              <button 
+                onClick={loadDashboardData} 
+                disabled={dashboardLoading}
+                className="w-full text-sm text-gray-300 hover:text-white disabled:opacity-50"
+              >
+                {dashboardLoading ? '⏳ Syncing...' : '🔄 Sync Now'}
+              </button>
+              <button onClick={() => navigate('/realtime')} className="w-full h-12 rounded-lg border border-white/30 text-gray-200 hover:bg-white/10 font-bold">Go to Tracking</button>
             </div>
           </section>
 
@@ -422,27 +471,74 @@ const Dashboard: React.FC = () => {
             <h3 className="text-[20px] font-bold mb-4">Progress Highlights</h3>
             <div className="flex items-start gap-4">
               <div className="text-5xl leading-none">🔥</div>
-              <div>
-                <div className="text-xl font-extrabold">15 Day Streak!</div>
-                <div className="text-sm text-gray-400">Keep the fire going!</div>
-                <div className="mt-4 h-20 rounded-lg bg-black/20 border border-white/10 flex items-center justify-center text-xs text-gray-400">Progress graph</div>
+              <div className="flex-1">
+                <div className="text-xl font-extrabold">
+                  {streakData ? `${streakData.current_streak} Day Streak!` : 'Loading...'}
+                </div>
+                <div className="text-sm text-gray-400">
+                  {streakData && streakData.current_streak > 0 ? 'Keep the fire going!' : 'Start your streak today!'}
+                </div>
+                <div className="mt-3 text-xs text-gray-400">
+                  Longest streak: {streakData ? `${streakData.longest_streak} days` : '—'}
+                </div>
+                <div className="mt-4 h-16 rounded-lg bg-black/20 border border-white/10 flex items-center justify-center gap-1 px-2">
+                  {Array.from({ length: 7 }).map((_, idx) => {
+                    const dayHasActivity = streakData && idx < streakData.current_streak;
+                    return (
+                      <div key={idx} className={`flex-1 h-full rounded ${dayHasActivity ? 'bg-[#EB4747]' : 'bg-white/10'}`}></div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
-            <button className="w-full h-12 mt-6 rounded-lg border border-white/30 text-gray-200 hover:bg-white/10 font-bold">Go to Progress</button>
+            <button onClick={() => navigate('/progress')} className="w-full h-12 mt-6 rounded-lg border border-white/30 text-gray-200 hover:bg-white/10 font-bold">Go to Progress</button>
           </section>
 
           {/* AI Coach (Fluxie) */}
-          <section className="bg-[#1E1E1E] rounded-2xl p-6 shadow-[0_4px_6px_-4px_rgba(0,0,0,0.1),0_10px_15px_-3px_rgba(0,0,0,0.1)]">
-            <h3 className="text-[20px] font-bold mb-4">AI Coach (Fluxie)</h3>
-            <div className="flex flex-wrap gap-2 mb-4">
-              <button className="px-3 py-1.5 rounded-full bg-white/10 text-sm">"Optimize my meal plan"</button>
-              <button className="px-3 py-1.5 rounded-full bg-white/10 text-sm">"Adjust my workout intensity"</button>
-              <button className="px-3 py-1.5 rounded-full bg-white/10 text-sm">"Show my progress this week"</button>
+          <section className="bg-gradient-to-br from-[#1E1E1E] to-[#2A1F1F] rounded-2xl p-6 shadow-[0_4px_6px_-4px_rgba(0,0,0,0.1),0_10px_15px_-3px_rgba(0,0,0,0.1)] border border-[#EB4747]/20">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#EB4747] to-[#b83232] flex items-center justify-center text-2xl shadow-lg shadow-[#EB4747]/30">
+                🤖
+              </div>
+              <div>
+                <h3 className="text-[20px] font-bold">AI Coach (Fluxie)</h3>
+                <p className="text-xs text-gray-400">Your personal fitness assistant</p>
+              </div>
             </div>
-            <div className="flex gap-3">
-              <input placeholder="Ask Fluxie anything..." className="flex-1 h-11 rounded-lg bg-black/20 border border-white/20 px-3 text-sm placeholder:text-gray-500 outline-none" />
-              <button onClick={() => navigate('/coach')} className="h-11 px-4 rounded-lg bg-[#EB4747] hover:bg-[#d13f3f] font-bold">Go to Coach</button>
+            
+            <div className="space-y-3 mb-4">
+              <p className="text-sm text-gray-300">Quick suggestions:</p>
+              <div className="grid grid-cols-1 gap-2">
+                <button 
+                  onClick={() => navigate('/coach')}
+                  className="px-4 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-[#EB4747]/30 text-left text-sm transition-all group"
+                >
+                  <span className="text-gray-200 group-hover:text-white">💪 "Optimize my workout plan"</span>
+                </button>
+                <button 
+                  onClick={() => navigate('/coach')}
+                  className="px-4 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-[#EB4747]/30 text-left text-sm transition-all group"
+                >
+                  <span className="text-gray-200 group-hover:text-white">🍽️ "Suggest meals for today"</span>
+                </button>
+                <button 
+                  onClick={() => navigate('/coach')}
+                  className="px-4 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-[#EB4747]/30 text-left text-sm transition-all group"
+                >
+                  <span className="text-gray-200 group-hover:text-white">📊 "Show my progress this week"</span>
+                </button>
+              </div>
             </div>
+            
+            <button 
+              onClick={() => navigate('/coach')} 
+              className="w-full h-12 rounded-lg bg-gradient-to-r from-[#EB4747] to-[#d13f3f] hover:from-[#d13f3f] hover:to-[#b83232] font-bold shadow-lg hover:shadow-xl transition-all duration-200 flex items-center justify-center gap-2"
+            >
+              <span>Chat with Fluxie</span>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+            </button>
           </section>
 
           {/* Featured AI Blog */}

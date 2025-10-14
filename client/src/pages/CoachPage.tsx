@@ -191,9 +191,20 @@ const CoachPage: React.FC = () => {
         isError: false,
         fileData: msg.file_data
       }));
-      
+
       console.log('Converted messages:', convertedMessages);
-      setMessages(convertedMessages);
+
+      // Check for duplicates before setting messages
+      setMessages(prev => {
+        const existingIds = new Set(prev.map(m => m.id));
+        const uniqueNewMessages = convertedMessages.filter(msg => !existingIds.has(msg.id));
+
+        if (uniqueNewMessages.length !== convertedMessages.length) {
+          console.warn('Found duplicate message IDs when loading session, filtering them out');
+        }
+
+        return [...prev, ...uniqueNewMessages];
+      });
       setCurrentSession(session);
     } catch (error) {
       console.error('Failed to load chat session:', error);
@@ -225,15 +236,28 @@ const CoachPage: React.FC = () => {
   };
 
   const addMessage = (content: string, isUser: boolean, isError: boolean = false, fileData?: {name: string, type: string, url: string}) => {
+    // Generate unique ID using timestamp + random component to avoid collisions
+    const uniqueId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
     const newMessage: ChatMessage = {
-      id: Date.now().toString(),
+      id: uniqueId,
       content,
       isUser,
       timestamp: new Date(),
       isError,
       fileData
     };
-    setMessages(prev => [...prev, newMessage]);
+
+    // Check for duplicates before adding
+    setMessages(prev => {
+      // Check if message with same ID already exists
+      const existingMessage = prev.find(msg => msg.id === uniqueId);
+      if (existingMessage) {
+        console.warn('Attempted to add duplicate message with ID:', uniqueId);
+        return prev;
+      }
+      return [...prev, newMessage];
+    });
   };
 
   const handleSend = async () => {
@@ -243,11 +267,11 @@ const CoachPage: React.FC = () => {
     let userMessage = '';
     let fileData: {name: string, type: string, url: string} | undefined = undefined;
     
-    if (selectedFile && selectedFileBlobUrl) {
+    if (selectedFile && persistentBlobUrls.has(selectedFile.name)) {
       fileData = {
         name: selectedFile.name,
         type: selectedFile.type,
-        url: selectedFileBlobUrl
+        url: persistentBlobUrls.get(selectedFile.name)!
       };
     }
     
@@ -334,16 +358,12 @@ const CoachPage: React.FC = () => {
     }
   };
 
-  // Store blob URLs for cleanup
-  const [selectedFileBlobUrl, setSelectedFileBlobUrl] = useState<string | null>(null);
+  // Store persistent blob URLs for chat messages (won't be revoked until unmount)
+  const [persistentBlobUrls, setPersistentBlobUrls] = useState<Map<string, string>>(new Map());
 
   // Function to clear selected file and reset input
   const clearSelectedFile = () => {
-    // Clean up blob URL if it exists to prevent memory leaks
-    if (selectedFileBlobUrl) {
-      URL.revokeObjectURL(selectedFileBlobUrl);
-      setSelectedFileBlobUrl(null);
-    }
+    // Don't revoke blob URL here - keep it for chat messages
     setSelectedFile(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -353,24 +373,25 @@ const CoachPage: React.FC = () => {
   // Create and manage blob URLs
   useEffect(() => {
     if (selectedFile) {
-      // Clean up previous blob URL
-      if (selectedFileBlobUrl) {
-        URL.revokeObjectURL(selectedFileBlobUrl);
-      }
-      // Create new blob URL
+      // Create new blob URL and store it persistently
       const newBlobUrl = URL.createObjectURL(selectedFile);
-      setSelectedFileBlobUrl(newBlobUrl);
+      setPersistentBlobUrls(prev => {
+        const newMap = new Map(prev);
+        newMap.set(selectedFile.name, newBlobUrl);
+        return newMap;
+      });
     }
   }, [selectedFile]);
 
   // Cleanup blob URLs when component unmounts
   useEffect(() => {
     return () => {
-      if (selectedFileBlobUrl) {
-        URL.revokeObjectURL(selectedFileBlobUrl);
-      }
+      // Revoke all persistent blob URLs on unmount
+      persistentBlobUrls.forEach(url => {
+        URL.revokeObjectURL(url);
+      });
     };
-  }, [selectedFileBlobUrl]);
+  }, [persistentBlobUrls]);
 
   const startRecording = async () => {
     try {
@@ -595,11 +616,11 @@ const CoachPage: React.FC = () => {
                   : new Date(session.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric' });
                 
                 return (
-                  <li key={session.id}>
+                  <li key={session.id} className="relative group">
                     <button
                       className={`group w-full rounded-xl transition-colors ${
-                        isSidebarCollapsed 
-                          ? 'h-11 grid place-items-center' 
+                        isSidebarCollapsed
+                          ? 'h-11 grid place-items-center'
                           : 'px-3 py-2.5 hover:bg-white/8'
                       } ${isActive ? 'bg-[#EB4747]/20 border border-[#EB4747]/30' : ''}`}
                       title={session.title}
@@ -631,21 +652,23 @@ const CoachPage: React.FC = () => {
                               )}
                             </div>
                           </div>
-                          <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              className="w-8 h-8 rounded-md hover:bg-red-500/20 hover:text-red-400 grid place-items-center cursor-pointer transition-colors" 
-                              aria-label="Delete chat"
-                              title="Delete chat"
-                              onClick={(e) => deleteChatSession(session.id, e)}
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14zM10 11v6M14 11v6" />
-                              </svg>
-                            </button>
-                          </div>
                         </div>
                       )}
                     </button>
+
+                    {/* Delete button positioned absolutely */}
+                    {!isSidebarCollapsed && (
+                      <button
+                        className="absolute right-2 top-1/2 transform -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity w-8 h-8 rounded-md hover:bg-red-500/20 hover:text-red-400 grid place-items-center cursor-pointer transition-colors z-10"
+                        aria-label="Delete chat"
+                        title="Delete chat"
+                        onClick={(e) => deleteChatSession(session.id, e)}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14zM10 11v6M14 11v6" />
+                        </svg>
+                      </button>
+                    )}
                   </li>
                 );
               })}
@@ -833,11 +856,11 @@ const CoachPage: React.FC = () => {
                       </div>
                       
                       {/* Compact Image Preview */}
-                      {selectedFile.type.startsWith('image/') && selectedFileBlobUrl && (
+                      {selectedFile.type.startsWith('image/') && persistentBlobUrls.has(selectedFile.name) && (
                         <div className="relative">
-                          <img 
-                            src={selectedFileBlobUrl} 
-                            alt="Preview" 
+                          <img
+                            src={persistentBlobUrls.get(selectedFile.name)}
+                            alt="Preview"
                             className="w-full max-h-24 rounded-lg border border-white/10 object-cover cursor-pointer hover:opacity-90 transition-all duration-200 hover:scale-[1.02]"
                             onClick={() => {
                               const newWindow = window.open();
@@ -846,7 +869,7 @@ const CoachPage: React.FC = () => {
                                   <html>
                                     <head><title>${selectedFile.name}</title></head>
                                     <body style="margin:0;padding:20px;background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh;">
-                                      <img src="${selectedFileBlobUrl}" style="max-width:100%;max-height:100%;object-fit:contain;" />
+                                      <img src="${persistentBlobUrls.get(selectedFile.name)}" style="max-width:100%;max-height:100%;object-fit:contain;" />
                                     </body>
                                   </html>
                                 `);
@@ -857,12 +880,12 @@ const CoachPage: React.FC = () => {
                           <div className="absolute inset-0 rounded-lg bg-gradient-to-t from-black/20 to-transparent pointer-events-none" />
                         </div>
                       )}
-                      
+
                       {/* Compact Audio Preview */}
-                      {selectedFile.type.startsWith('audio/') && selectedFileBlobUrl && (
+                      {selectedFile.type.startsWith('audio/') && persistentBlobUrls.has(selectedFile.name) && (
                         <div className="mt-2">
-                          <audio 
-                            controls 
+                          <audio
+                            controls
                             className="w-full h-8"
                             style={{
                               backgroundColor: 'rgba(255, 255, 255, 0.05)',
@@ -870,7 +893,7 @@ const CoachPage: React.FC = () => {
                               outline: 'none'
                             }}
                           >
-                            <source src={selectedFileBlobUrl} type={selectedFile.type} />
+                            <source src={persistentBlobUrls.get(selectedFile.name)} type={selectedFile.type} />
                             Your browser does not support the audio element.
                           </audio>
                         </div>

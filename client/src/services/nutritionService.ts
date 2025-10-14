@@ -38,6 +38,55 @@ export type MacroTargets = {
   updated_at: string;
 };
 
+export type AgentPlan = {
+  meal_type?: string;
+  title?: string;
+  calories?: number;
+  protein_g?: number;
+  carbs_g?: number;
+  fats_g?: number;
+  ingredients?: string[];
+  steps?: string[];
+};
+
+export type AgentPlanResponse = {
+  plan: AgentPlan[];
+  snacks: AgentPlan[];
+  suggestions?: string[];
+  water_goal_ml?: number;
+  plan_macros?: {
+    calories: number;
+    protein_g: number;
+    carbs_g: number;
+    fats_g: number;
+  };
+  grocery_list?: string[];
+  // Present in some responses like auto-generate when using cached plan
+  cached?: boolean;
+};
+
+export type RefreshAgentPlanResponse = AgentPlanResponse & {
+  cached: boolean;
+  saved?: boolean;
+};
+
+export type MealSwapResponse = {
+  alternatives?: Array<{ title?: string } | string>;
+  swaps?: Record<string, any[]>;
+  plan?: AgentPlan[];
+  snacks?: AgentPlan[];
+  message?: string;
+  saved?: boolean;
+  plan_macros?: {
+    calories: number;
+    protein_g: number;
+    carbs_g: number;
+    fats_g: number;
+  };
+  grocery_list?: string[];
+  water_goal_ml?: number;
+};
+
 export const NutritionService = {
   async listMeals(params?: { start?: string; end?: string }): Promise<MealLog[]> {
     const usp = new URLSearchParams();
@@ -78,7 +127,7 @@ export const NutritionService = {
     return resp.json();
   },
 
-  async waterToday(): Promise<{ total_ml: number; logs: { id: string; amount_ml: number; timestamp: string }[] }> {
+  async waterToday(): Promise<{ total_ml: number; goal_ml: number; logs: { id: string; amount_ml: number; timestamp: string }[] }> {
     const resp = await fetch(API_ENDPOINTS.NUTRITION.WATER_TODAY, { headers: authHeaders() });
     if (!resp.ok) throw new Error("Failed to fetch today's water");
     return resp.json();
@@ -102,7 +151,7 @@ export const NutritionService = {
     return resp.blob();
   },
 
-  async mealSwap(payload: { meal_id?: string; reason?: string; desired_profile?: Record<string, any> }): Promise<{ swaps: Record<string, string[]> }> {
+  async mealSwap(payload: { meal_id?: string; reason?: string; desired_profile?: Record<string, any>; meal_type?: string; current_meal_title?: string; alternatives_count?: number; swap_in_title?: string; swap_in_meal?: any }): Promise<MealSwapResponse> {
     const resp = await fetch(API_ENDPOINTS.NUTRITION.MEAL_SWAP, { method: 'POST', headers: authHeaders(), body: JSON.stringify(payload) });
     if (!resp.ok) throw new Error("Failed to fetch meal swap suggestions");
     return resp.json();
@@ -123,6 +172,50 @@ export const NutritionService = {
   async runAgent(): Promise<{ status: string }> {
     const resp = await fetch(API_ENDPOINTS.NUTRITION.AGENT_RUN, { method: 'POST', headers: authHeaders() });
     if (!resp.ok) throw new Error("Failed to queue nutrition agent");
+    return resp.json();
+  },
+
+  async generateAgentPlan(): Promise<AgentPlanResponse> {
+    const resp = await fetch(API_ENDPOINTS.NUTRITION.AGENT_PLAN, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    if (!resp.ok) throw new Error("Failed to generate nutrition plan");
+    return resp.json();
+  },
+
+  async refreshAgentPlan(force = false): Promise<RefreshAgentPlanResponse> {
+    const resp = await fetch(API_ENDPOINTS.NUTRITION.AGENT_REFRESH, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ force }),
+    });
+    if (!resp.ok) throw new Error("Failed to refresh nutrition plan");
+    return resp.json();
+  },
+
+  async autoGenerateMealPlan(): Promise<AgentPlanResponse> {
+    const resp = await fetch(API_ENDPOINTS.NUTRITION.AGENT_AUTO_GENERATE, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    if (!resp.ok) throw new Error("Failed to auto-generate meal plan");
+    return resp.json();
+  },
+
+  async saveAgentPlan(payload: { plan: AgentPlan[]; snacks: AgentPlan[]; water_goal_ml?: number; grocery_list?: string[]; suggestions?: string[]; plan_macros?: any }): Promise<{ success: boolean; plan?: AgentPlan[]; snacks?: AgentPlan[]; water_goal_ml?: number; grocery_list?: string[]; plan_macros?: any; saved?: boolean }> {
+    const resp = await fetch(API_ENDPOINTS.NUTRITION.AGENT_SAVE, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) throw new Error("Failed to save meal plan");
+    return resp.json();
+  },
+
+  async swapWithAgent(payload: { meal_id?: string; reason?: string; desired_profile?: Record<string, any>; meal_type?: string; current_meal_title?: string; alternatives_count?: number; swap_in_title?: string }): Promise<AgentPlanResponse & { swaps: string[] }> {
+    const resp = await fetch(API_ENDPOINTS.NUTRITION.AGENT_SWAP, { method: 'POST', headers: authHeaders(), body: JSON.stringify(payload) });
+    if (!resp.ok) throw new Error("Failed to fetch agent swap suggestions");
     return resp.json();
   },
 

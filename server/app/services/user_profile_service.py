@@ -58,16 +58,36 @@ class UserProfileService:
             return None
     
     @staticmethod
-    async def get_comprehensive_user_profile(user_id: str) -> Dict[str, Any]:
-        """Get comprehensive user profile combining onboarding and workout data"""
+    async def get_user_nutrition_profile(user_id: str) -> Optional[Dict[str, Any]]:
+        """Get user's nutrition profile data"""
         try:
-            # Get both profiles in parallel
+            nutrition_doc = db.nutrition_profiles.find_one({"user_id": ObjectId(user_id)})
+            if not nutrition_doc:
+                logger.info(f"No nutrition profile found for user: {user_id}")
+                return None
+            
+            # Convert ObjectIds to strings for JSON serialization
+            nutrition_doc["_id"] = str(nutrition_doc["_id"])
+            nutrition_doc["user_id"] = str(nutrition_doc["user_id"])
+            
+            return nutrition_doc
+            
+        except Exception as e:
+            logger.error(f"Error fetching nutrition profile for user {user_id}: {e}")
+            return None
+    
+    @staticmethod
+    async def get_comprehensive_user_profile(user_id: str) -> Dict[str, Any]:
+        """Get comprehensive user profile combining onboarding, workout, and nutrition data"""
+        try:
+            # Get all profiles in parallel
             import asyncio
             onboarding_task = UserProfileService.get_user_onboarding_profile(user_id)
             workout_task = UserProfileService.get_user_workout_profile(user_id)
+            nutrition_task = UserProfileService.get_user_nutrition_profile(user_id)
             
-            onboarding_data, workout_data = await asyncio.gather(
-                onboarding_task, workout_task, return_exceptions=True
+            onboarding_data, workout_data, nutrition_data = await asyncio.gather(
+                onboarding_task, workout_task, nutrition_task, return_exceptions=True
             )
             
             # Handle exceptions
@@ -79,14 +99,20 @@ class UserProfileService:
                 logger.error(f"Workout data fetch failed: {workout_data}")
                 workout_data = None
             
+            if isinstance(nutrition_data, Exception):
+                logger.error(f"Nutrition data fetch failed: {nutrition_data}")
+                nutrition_data = None
+            
             # Build comprehensive profile
             profile = {
                 "user_id": user_id,
                 "has_onboarding": bool(onboarding_data),
                 "has_workout_profile": bool(workout_data),
+                "has_nutrition_profile": bool(nutrition_data),
                 "onboarding": onboarding_data,
                 "workout_profile": workout_data,
-                "profile_completeness": UserProfileService._calculate_profile_completeness(onboarding_data, workout_data),
+                "nutrition_profile": nutrition_data,
+                "profile_completeness": UserProfileService._calculate_profile_completeness(onboarding_data, workout_data, nutrition_data),
                 "last_updated": datetime.now(timezone.utc).isoformat()
             }
             
@@ -106,7 +132,7 @@ class UserProfileService:
             }
     
     @staticmethod
-    def _calculate_profile_completeness(onboarding_data: Optional[Dict], workout_data: Optional[Dict]) -> int:
+    def _calculate_profile_completeness(onboarding_data: Optional[Dict], workout_data: Optional[Dict], nutrition_data: Optional[Dict] = None) -> int:
         """Calculate profile completeness percentage"""
         completeness = 0
         
@@ -122,16 +148,23 @@ class UserProfileService:
             step2_fields = ["activity_level", "fitness_goals", "time_available", "preferred_workout_type"]
             step2_complete = sum(1 for field in step2_fields if step2.get(field))
             
-            # Onboarding contributes 60% of completeness
+            # Onboarding contributes 50% of completeness
             onboarding_score = (step1_complete + step2_complete) / (len(step1_fields) + len(step2_fields))
-            completeness += onboarding_score * 60
+            completeness += onboarding_score * 50
         
         if workout_data:
-            # Workout profile contributes 40% of completeness
+            # Workout profile contributes 25% of completeness
             workout_fields = ["location", "equipment", "style_preferences", "experience_level", "daily_minutes"]
             workout_complete = sum(1 for field in workout_fields if workout_data.get(field))
             workout_score = workout_complete / len(workout_fields)
-            completeness += workout_score * 40
+            completeness += workout_score * 25
+        
+        if nutrition_data:
+            # Nutrition profile contributes 25% of completeness
+            nutrition_fields = ["diet_type", "meals_per_day", "allergies", "favorite_cuisines"]
+            nutrition_complete = sum(1 for field in nutrition_fields if nutrition_data.get(field))
+            nutrition_score = nutrition_complete / len(nutrition_fields)
+            completeness += nutrition_score * 25
         
         return int(completeness)
     
@@ -220,6 +253,29 @@ class UserProfileService:
                 custom_str = ", ".join(workout_profile["custom_equipment"])
                 context_parts.append(f"• Custom Equipment: {custom_str}")
         
+        # Nutrition Profile Information
+        nutrition_profile = profile_data.get("nutrition_profile")
+        if nutrition_profile:
+            context_parts.append("\n--- NUTRITION PREFERENCES ---")
+            if nutrition_profile.get("diet_type"):
+                context_parts.append(f"• Diet Type: {nutrition_profile['diet_type']}")
+            if nutrition_profile.get("meals_per_day"):
+                context_parts.append(f"• Meals Per Day: {nutrition_profile['meals_per_day']}")
+            if nutrition_profile.get("snacks_per_day"):
+                context_parts.append(f"• Snacks Per Day: {nutrition_profile['snacks_per_day']}")
+            if nutrition_profile.get("allergies"):
+                allergies_str = ", ".join(nutrition_profile["allergies"]) if isinstance(nutrition_profile["allergies"], list) else nutrition_profile["allergies"]
+                context_parts.append(f"• Allergies: {allergies_str}")
+            if nutrition_profile.get("disliked_foods"):
+                context_parts.append(f"• Dislikes: {nutrition_profile['disliked_foods']}")
+            if nutrition_profile.get("favorite_cuisines"):
+                cuisines_str = ", ".join(nutrition_profile["favorite_cuisines"]) if isinstance(nutrition_profile["favorite_cuisines"], list) else nutrition_profile["favorite_cuisines"]
+                context_parts.append(f"• Favorite Cuisines: {cuisines_str}")
+            if nutrition_profile.get("cooking_time"):
+                context_parts.append(f"• Cooking Time Preference: {nutrition_profile['cooking_time']}")
+            if nutrition_profile.get("cooking_experience"):
+                context_parts.append(f"• Cooking Experience: {nutrition_profile['cooking_experience']}")
+        
         # Personalization Instructions
         if context_parts:
             context_parts.append("\n--- COACHING INSTRUCTIONS ---")
@@ -228,7 +284,9 @@ class UserProfileService:
             context_parts.append("• Adapt workout suggestions to their equipment and location")
             context_parts.append("• Consider their experience level and available time")
             context_parts.append("• Be mindful of any medical conditions or risk factors")
-            context_parts.append("• Build on their existing fitness journey and preferences")
+            context_parts.append("• For nutrition questions, respect their diet type, allergies, and food preferences")
+            context_parts.append("• Suggest meals that match their cooking time and experience level")
+            context_parts.append("• Build on their existing fitness and nutrition journey")
         
         return "\n".join(context_parts) if context_parts else ""
     

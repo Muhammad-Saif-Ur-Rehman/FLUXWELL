@@ -195,15 +195,6 @@ async def register_user(user_data: UserRegistration):
                     "other_medical_condition": "",
                     "custom_goal": ""
                 },
-                "nutrition": {
-                    "diet_type": "Balanced",
-                    "allergies": [],
-                    "disliked_foods": "",
-                    "favorite_cuisines": [],
-                    "meals_per_day": None,
-                    "snacks_per_day": None,
-                    "cooking_time_preference": None
-                },
                 "completed": False
             }
         }
@@ -327,8 +318,8 @@ async def save_onboarding_data(
         if onboarding_data.step2:
             update_data["onboarding.step2"] = onboarding_data.step2.dict(exclude_none=True)
         
-        if onboarding_data.nutrition:
-            update_data["onboarding.nutrition"] = onboarding_data.nutrition.dict(exclude_none=True)
+        # Note: Nutrition data is no longer stored in user onboarding
+        # It should be saved separately using the nutrition profile endpoint
         
         if onboarding_data.complete:
             update_data["onboarding_completed"] = True
@@ -416,7 +407,8 @@ async def get_onboarding_data(current_user=Depends(get_current_user)):
         onboarding_data = user.get("onboarding", {})
         step1_data = onboarding_data.get("step1", {})
         step2_data = onboarding_data.get("step2", {})
-        nutrition_data = onboarding_data.get("nutrition", {})
+        # Note: nutrition_data is no longer stored in user onboarding
+        # Use /nutrition/profile endpoint to get nutrition data
         
         # Quick social auth data extraction (simplified)
         social_merged_data = {}
@@ -459,15 +451,9 @@ async def get_onboarding_data(current_user=Depends(get_current_user)):
             "custom_goal": step2_data.get("custom_goal", "")
         }
         
-        merged_nutrition = {
-            "diet_type": nutrition_data.get("diet_type", "Balanced"),
-            "allergies": nutrition_data.get("allergies", []),
-            "disliked_foods": nutrition_data.get("disliked_foods", ""),
-            "favorite_cuisines": nutrition_data.get("favorite_cuisines", []),
-            "meals_per_day": nutrition_data.get("meals_per_day"),
-            "snacks_per_day": nutrition_data.get("snacks_per_day"),
-            "cooking_time_preference": nutrition_data.get("cooking_time_preference")
-        }
+        # Nutrition data is no longer returned here
+        # Use /nutrition/profile endpoint to get nutrition profile data
+        merged_nutrition = None
         
         return {
             "step1": merged_step1,
@@ -587,16 +573,8 @@ async def update_onboarding_nutrition(
             profile_doc["user_id"] = current_user["_id"]
             nutrition_profiles_collection.insert_one(profile_doc)
 
-        users_collection.update_one(
-            {"_id": current_user["_id"]},
-            {
-                "$set": {
-                    "onboarding.nutrition": payload,
-                    "onboarding.nutrition_configured": True,
-                    "updated_at": now
-                }
-            }
-        )
+        # Note: Nutrition data is now stored only in nutrition_profiles collection
+        # No longer storing in user onboarding data to maintain separation
 
         saved = nutrition_profiles_collection.find_one({"user_id": current_user["_id"]})
         return {
@@ -615,26 +593,32 @@ async def update_onboarding_nutrition(
 
 @router.get("/onboarding/nutrition")
 async def get_onboarding_nutrition(current_user=Depends(get_current_user)):
-    """Get only the nutrition onboarding slice for the current user."""
+    """Get nutrition data from nutrition profiles collection only."""
     try:
         profile = nutrition_profiles_collection.find_one({"user_id": current_user["_id"]})
-        payload = profile or {}
-        configured = bool(profile)
-        if not payload:
-            user = users_collection.find_one({"_id": current_user["_id"]}, {"onboarding.nutrition": 1, "onboarding.nutrition_configured": 1})
-            onboarding_obj = (user.get("onboarding", {}) or {}) if user else {}
-            payload = onboarding_obj.get("nutrition", {})
-            configured = bool(onboarding_obj.get("nutrition_configured", False))
+        if not profile:
+            # Return default values if no profile exists
+            nutrition = {
+                "diet_type": "Balanced",
+                "allergies": [],
+                "disliked_foods": "",
+                "favorite_cuisines": [],
+                "meals_per_day": None,
+                "snacks_per_day": None,
+                "cooking_time_preference": None,
+            }
+            return {"nutrition": nutrition, "nutrition_exists": False}
+        
         nutrition = {
-            "diet_type": payload.get("diet_type", "Balanced"),
-            "allergies": payload.get("allergies", []),
-            "disliked_foods": payload.get("disliked_foods", ""),
-            "favorite_cuisines": payload.get("favorite_cuisines", []),
-            "meals_per_day": payload.get("meals_per_day"),
-            "snacks_per_day": payload.get("snacks_per_day"),
-            "cooking_time_preference": payload.get("cooking_time_preference"),
+            "diet_type": profile.get("diet_type", "Balanced"),
+            "allergies": profile.get("allergies", []),
+            "disliked_foods": profile.get("disliked_foods", ""),
+            "favorite_cuisines": profile.get("favorite_cuisines", []),
+            "meals_per_day": profile.get("meals_per_day"),
+            "snacks_per_day": profile.get("snacks_per_day"),
+            "cooking_time_preference": profile.get("cooking_time_preference"),
         }
-        return {"nutrition": nutrition, "nutrition_exists": configured}
+        return {"nutrition": nutrition, "nutrition_exists": True}
     except HTTPException:
         raise
     except Exception as e:
@@ -768,15 +752,6 @@ async def google_callback(request: Request):
                         "preferred_workout_type": "",
                         "other_medical_condition": "",
                         "custom_goal": ""
-                    },
-                    "nutrition": {
-                        "diet_type": "Balanced",
-                        "allergies": [],
-                        "disliked_foods": "",
-                        "favorite_cuisines": [],
-                        "meals_per_day": None,
-                        "snacks_per_day": None,
-                        "cooking_time_preference": None
                     },
                     "completed": False
                 }

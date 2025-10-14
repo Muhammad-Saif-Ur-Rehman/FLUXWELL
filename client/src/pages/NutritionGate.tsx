@@ -21,28 +21,8 @@ export default function NutritionGate() {
           return;
         }
       } catch (e) {
-        // ignore; fall back to onboarding data
+        console.error('Failed to load nutrition profile:', e);
       }
-      try {
-        const onboarding = await fetch('/auth/onboarding/nutrition', { headers: { Authorization: `Bearer ${token}` } });
-        if (onboarding.ok) {
-          const data = await onboarding.json();
-          const n = data?.nutrition || {};
-          const exists = Boolean(data?.nutrition_exists);
-          const hasProfile = exists || Boolean(
-            (Array.isArray(n.allergies) && n.allergies.some((item: string) => item && item.trim())) ||
-            (Array.isArray(n.favorite_cuisines) && n.favorite_cuisines.some((item: string) => item && item.trim())) ||
-            (typeof n.meals_per_day === 'number' && n.meals_per_day > 0) ||
-            (typeof n.snacks_per_day === 'number' && n.snacks_per_day > 0) ||
-            (typeof n.cooking_time_preference === 'string' && n.cooking_time_preference.trim().length > 0) ||
-            (typeof n.disliked_foods === 'string' && n.disliked_foods.trim().length > 0)
-          );
-          if (hasProfile) {
-            setStatus('ready');
-            return;
-          }
-        }
-      } catch {}
       setStatus('onboarding');
     };
     check();

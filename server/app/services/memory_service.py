@@ -246,11 +246,17 @@ Only include information that was explicitly mentioned or can be reasonably infe
         }
     
     @staticmethod
-    async def build_memory_context(session_id: str, user_id: Optional[str] = None) -> str:
-        """Build context string from conversation memory for LLM with caching and user profile integration"""
+    async def build_memory_context(session_id: str, user_id: Optional[str] = None, include_profile: bool = True) -> str:
+        """Build context string from conversation memory for LLM with caching and user profile integration
+        
+        Args:
+            session_id: Chat session ID
+            user_id: User ID for profile integration
+            include_profile: Whether to include user profile context (default True, set False for greetings)
+        """
         
         # Check cache first
-        cache_key = f"context_{session_id}"
+        cache_key = f"context_{session_id}_{'with_profile' if include_profile else 'no_profile'}"
         if cache_key in _memory_cache:
             cached_data = _memory_cache[cache_key]
             if time.time() - cached_data['timestamp'] < _cache_ttl:
@@ -258,7 +264,7 @@ Only include information that was explicitly mentioned or can be reasonably infe
         
         # Get conversation memory and user profile in parallel
         memory_task = ChatService.get_conversation_memory(session_id)
-        profile_task = MemoryService._get_user_profile_context(user_id) if user_id else None
+        profile_task = MemoryService._get_user_profile_context(user_id) if (user_id and include_profile) else None
         
         if profile_task:
             memory, profile_context = await asyncio.gather(memory_task, profile_task, return_exceptions=True)

@@ -63,8 +63,8 @@ class LangGraphChatService:
             self.groq_client = ChatGroq(
                 api_key=api_key,
                 model_name="meta-llama/llama-4-maverick-17b-128e-instruct",
-                temperature=0.7,
-                max_tokens=1024,
+                temperature=0.6,  # Reduced for more focused responses
+                max_tokens=512,  # Reduced to enforce concise responses (was 1024)
                 timeout=30.0,
                 max_retries=3
             )
@@ -254,6 +254,11 @@ class LangGraphChatService:
     async def _load_memory_parallel_node(self, state: ChatState) -> Dict[str, Any]:
         """Load conversation memory with caching and parallel processing"""
         session_id = state["session_id"]
+        user_message = state.get("user_message", "").lower().strip()
+        
+        # Check if this is a simple greeting (don't load profile for greetings)
+        greeting_patterns = ['hi', 'hello', 'hey', 'greetings', 'good morning', 'good afternoon', 'good evening', 'howdy', 'sup', 'yo', 'hiya']
+        is_greeting = any(user_message == pattern or user_message.startswith(pattern + ' ') for pattern in greeting_patterns)
         
         # Check cache first
         if session_id in self.memory_cache:
@@ -270,8 +275,9 @@ class LangGraphChatService:
             user_id = state.get("user_id")
             
             # Run memory operations in parallel with user profile integration
+            # Skip profile loading for simple greetings to avoid mentioning user data
             memory_tasks = [
-                MemoryService.build_memory_context(session_id, user_id),
+                MemoryService.build_memory_context(session_id, user_id, include_profile=not is_greeting),
                 asyncio.create_task(self._get_memory_doc_async(session_id))
             ]
             
@@ -483,20 +489,22 @@ CORE PRINCIPLES:
             system_msg = f"""{base_personality}
 
 VOICE INTERACTION GUIDELINES:
-- Keep responses conversational and natural
+- Keep responses CONCISE and conversational (max 150 words)
 - Use shorter sentences that are easy to understand when spoken
 - Be encouraging and supportive
 - Ask follow-up questions when appropriate
 - Avoid overly technical jargon unless necessary
-- Structure answers clearly with numbered points when helpful"""
+- Structure answers clearly with 2-3 numbered points maximum"""
         else:
             system_msg = f"""{base_personality}
 
 INTERACTION GUIDELINES:
-- Provide detailed, well-structured responses
-- Use bullet points and formatting for clarity
-- Include specific examples and actionable advice
-- Reference scientific principles when relevant"""
+- Keep responses FOCUSED and CONCISE (max 200-250 words)
+- Provide well-structured, actionable responses
+- Use bullet points for clarity (max 5 points)
+- Include specific examples when helpful
+- Stay directly relevant to the user's question
+- Avoid excessive background information unless specifically requested"""
 
         # Add context usage instructions
         if has_quality_context:
