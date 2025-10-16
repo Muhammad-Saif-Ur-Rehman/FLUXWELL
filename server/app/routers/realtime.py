@@ -59,11 +59,25 @@ async def parallel_fetch_google_fit(token: str, data_types: list) -> Dict[str, A
     user = db.users.find_one({"access_token": token})
     last_sync_timestamp = user.get("last_sync_timestamp") if user else None
     
+    # IMPORTANT: Always fetch from start of current day (midnight) to get all today's data
+    # This ensures we get real-time data including steps from today
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start_millis = int(today_start.timestamp() * 1000)
+    
     if not last_sync_timestamp:
-        # Default to 24 hours ago if no previous sync
-        last_sync_timestamp = int((datetime.utcnow() - timedelta(hours=24)).timestamp() * 1000)
+        # Default to start of today for first sync
+        last_sync_timestamp = today_start_millis
+    else:
+        # Always look back at least to start of today to ensure we get today's data
+        # Google Fit may have sync delays, so we need to re-fetch today's data each time
+        last_sync_timestamp = min(last_sync_timestamp, today_start_millis)
     
     current_time_millis = int(datetime.utcnow().timestamp() * 1000)
+    
+    # Log the time range for debugging
+    from_time = datetime.fromtimestamp(last_sync_timestamp / 1000).strftime('%Y-%m-%d %H:%M:%S')
+    to_time = datetime.fromtimestamp(current_time_millis / 1000).strftime('%Y-%m-%d %H:%M:%S')
+    print(f"📅 Fetching data from {from_time} to {to_time}")
 
     # Reuse a single HTTP/2 AsyncClient for true parallelism and connection reuse
     async with httpx.AsyncClient(
@@ -129,15 +143,17 @@ async def fetch_google_fit_with_client(
     """Optimized fetch using shared client to ensure true parallelism."""
     try:
         # Use correct data source IDs according to Google Fit API documentation
-        # For sensitive health data, use raw data sources or omit dataSourceId
+        # For metrics that may not be available to all users, omit dataSourceId to use all available sources
+        # This prevents 403 errors when specific datasources don't exist
         data_source_mapping = {
-            # Prefer merged step deltas which is more broadly populated than estimated_steps
+            # Common activity metrics - use specific merged datasources
             "com.google.step_count.delta": "derived:com.google.step_count.delta:com.google.android.gms:merge_step_deltas",
-            "com.google.heart_rate.bpm": "derived:com.google.heart_rate.bpm:com.google.android.gms:merge_heart_rate_bpm",
             "com.google.calories.expended": "derived:com.google.calories.expended:com.google.android.gms:merge_calories_expended",
             "com.google.distance.delta": "derived:com.google.distance.delta:com.google.android.gms:merge_distance_delta",
             "com.google.sleep.segment": "derived:com.google.sleep.segment:com.google.android.gms:merged",
-            # For sensitive health data, omit dataSourceId to use all available sources
+            # For health metrics that may not be available, omit dataSourceId to use all available sources
+            # This prevents 403 "datasource not found" errors
+            "com.google.heart_rate.bpm": None,  # User may not have heart rate data
             "com.google.blood_pressure": None,
             "com.google.blood_glucose": None,
             "com.google.oxygen_saturation": None,
@@ -182,10 +198,17 @@ async def fetch_google_fit_with_client(
         }
         
         request_start = asyncio.get_event_loop().time()
+        
+        # Log detailed time range for debugging
+        start_dt = datetime.fromtimestamp(effective_start / 1000).strftime('%Y-%m-%d %H:%M:%S')
+        end_dt = datetime.fromtimestamp(current_time_millis / 1000).strftime('%Y-%m-%d %H:%M:%S')
+        
         if data_source_id:
             print(f"🔄 [{request_start:.2f}] Starting {data_type} from {data_source_id}")
+            print(f"   ⏰ Time range: {start_dt} to {end_dt}")
         else:
             print(f"🔄 [{request_start:.2f}] Starting {data_type} (all available sources)")
+            print(f"   ⏰ Time range: {start_dt} to {end_dt}")
         
         r = await client.post(
             GOOGLE_FIT_URL,
@@ -202,21 +225,18 @@ async def fetch_google_fit_with_client(
             try:
                 error_data = r.json()
                 error_message = error_data.get('error', {}).get('message', 'Unknown error')
-                print(f"⚠️ Google Fit API 403 for {data_type}: {error_message}")
+                
+                # Check if this is a datasource not found error
+                if 'datasource' in error_message.lower() or 'not found' in error_message.lower():
+                    print(f"⚠️ Google Fit: {data_type} datasource not available for this user (common for health metrics)")
+                else:
+                    print(f"⚠️ Google Fit API 403 for {data_type}: {error_message}")
             except:
-                print(f"⚠️ Google Fit API 403 for {data_type} - Access denied")
+                print(f"⚠️ Google Fit API 403 for {data_type} - Access denied or datasource unavailable")
             
-            # Check if this is a scope issue
-            restricted_scopes = [
-                "com.google.blood_glucose",
-                "com.google.blood_pressure", 
-                "com.google.body.temperature",
-                "com.google.oxygen_saturation"
-            ]
-            
-            if any(scope in data_type for scope in restricted_scopes):
-                print(f"⚠️ This may be due to insufficient OAuth scopes for {data_type}")
-            return None
+            # This is normal for health metrics that user doesn't track
+            # Return empty data instead of None to indicate successful fetch with no data
+            return []
         elif r.status_code == 401:
             print(f"⚠️ Google Fit API unauthorized for {data_type} - token may be expired")
             return None
@@ -242,10 +262,34 @@ async def fetch_google_fit_with_client(
             request_end = asyncio.get_event_loop().time()
             duration = request_end - request_start
             print(f"✅ [{request_end:.2f}] {data_type}: {len(all_points)} data points ({duration:.2f}s)")
+            
+            # Debug: Show sample data points for steps to help diagnose issues
+            if data_type == "com.google.step_count.delta" and all_points:
+                print(f"   📊 Sample step data (first 3 points):")
+                for i, point in enumerate(all_points[:3]):
+                    values = point.get("value", [])
+                    step_value = values[0].get("intVal", 0) if values else 0
+                    start_time = point.get("startTimeNanos", 0)
+                    start_dt = datetime.fromtimestamp(int(start_time) / 1e9).strftime('%Y-%m-%d %H:%M:%S') if start_time else "N/A"
+                    print(f"      Point {i+1}: {step_value} steps at {start_dt}")
+            
             return all_points
         request_end = asyncio.get_event_loop().time()
         duration = request_end - request_start
         print(f"⚠️ [{request_end:.2f}] {data_type}: No data found ({duration:.2f}s)")
+        
+        # Debug: If steps data is empty, show the response structure
+        if data_type == "com.google.step_count.delta":
+            print(f"   🔍 Empty response structure - bucket count: {len(data.get('bucket', []))}")
+            if data.get("bucket"):
+                for i, bucket in enumerate(data["bucket"][:2]):  # Show first 2 buckets
+                    dataset_count = len(bucket.get("dataset", []))
+                    print(f"      Bucket {i+1}: {dataset_count} datasets")
+                    if bucket.get("dataset"):
+                        for j, dataset in enumerate(bucket["dataset"][:2]):
+                            point_count = len(dataset.get("point", []))
+                            print(f"         Dataset {j+1}: {point_count} points")
+        
         return []
         
     except httpx.TimeoutException:
@@ -812,15 +856,19 @@ async def get_metrics(user_id: str = Depends(get_current_user_id)):
                 f"Sleep={result['sleep']}"
             )
             
-            # Update last sync timestamp for incremental fetching (with overlap)
+            # Update last sync timestamp for incremental fetching
+            # Note: We intentionally set this to start of today to ensure we always re-fetch today's data
+            # This is necessary because Google Fit data can arrive with delays
             try:
-                # keep a 60s overlap to avoid gaps due to clock drift/late writes
-                current_time_millis = int(datetime.utcnow().timestamp() * 1000)
-                overlapped_next_start = max(0, current_time_millis - 60_000)
+                today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+                today_start_millis = int(today_start.timestamp() * 1000)
+                
+                # Always set to start of today to ensure fresh data on next fetch
                 db.users.update_one(
                     {"_id": user_object_id},
-                    {"$set": {"last_sync_timestamp": overlapped_next_start}}
+                    {"$set": {"last_sync_timestamp": today_start_millis}}
                 )
+                print(f"🔄 Sync timestamp updated to start of today for next fetch")
             except Exception as e:
                 print(f"⚠️ Failed to update sync timestamp: {e}")
             

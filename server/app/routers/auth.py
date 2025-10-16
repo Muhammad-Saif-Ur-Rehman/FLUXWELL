@@ -638,6 +638,7 @@ async def save_ai_assessment(
             "motivational_message": assessment_data.motivational_message,
             "health_score": assessment_data.health_score,
             "risk_profile": assessment_data.risk_profile,
+            "predicted_calories": assessment_data.predicted_calories,
             "generated_at": datetime.utcnow()
         }
         

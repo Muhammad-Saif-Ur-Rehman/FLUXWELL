@@ -123,6 +123,7 @@ export interface AIAssessmentResponse {
   motivational_message: string;
   health_score: number;
   risk_profile: string[];
+  predicted_calories: number;  // AI-predicted daily calorie needs
 }
 
 export interface GoalFeasibilityRequest {

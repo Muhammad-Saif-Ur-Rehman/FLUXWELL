@@ -39,6 +39,7 @@ class AIAssessmentResult(BaseModel):
     motivational_message: str
     health_score: int
     risk_profile: List[str]
+    predicted_calories: int  # AI-predicted daily calorie needs
     generated_at: Optional[datetime] = None
 
 class OnboardingData(BaseModel):

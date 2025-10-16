@@ -205,7 +205,8 @@ async def chat_with_fluxie_langgraph(
             file_data = {
                 "name": file.filename,
                 "type": file.content_type,
-                "image_data": img_base64
+                "image_data": img_base64,
+                "image_bytes": file_content  # Pass raw bytes for embedding
             }
             
             if not processed_message:

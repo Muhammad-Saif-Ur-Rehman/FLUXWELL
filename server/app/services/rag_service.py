@@ -136,9 +136,9 @@ def embed_image_bytes(image_bytes: bytes) -> List[float]:
     if _image_client is None:
         raise RuntimeError("HF image embedding client not initialized. Check HF_IMAGE_SPACE configuration.")
     
-    # You can use gradio_client.Client.handle_file when calling.
+    # Use gradio_client.handle_file to wrap raw bytes
     from gradio_client import handle_file
-    tmp_handle = handle_file(image_bytes, fname="upload.png")
+    tmp_handle = handle_file(image_bytes)
     try:
         resp = _image_client.predict(image=tmp_handle, api_name="/embed_image")
     except Exception as e:

@@ -14,6 +14,7 @@ const Dashboard: React.FC = () => {
     motivational_message: string;
     health_score: number;
     risk_profile: string[];
+    predicted_calories?: number;  // AI-predicted daily calorie needs
     generated_at?: string;
   } | null>(null);
   const [onboardingStep1, setOnboardingStep1] = useState<{ height?: string; weight?: string; date_of_birth?: string; gender?: string; profile_picture_url?: string } | null>(null);
@@ -101,7 +102,7 @@ const Dashboard: React.FC = () => {
     return 1.2;
   };
 
-  const { bmiValue, bmiDisplay, tdeeDisplay } = useMemo(() => {
+  const { bmiValue, bmiDisplay, tdeeDisplay, caloriesValue } = useMemo(() => {
     const heightM = parseHeightToMeters(onboardingStep1?.height || (user as any)?.height || undefined);
     const weightKg = parseWeightToKg(onboardingStep1?.weight || (user as any)?.weight || undefined);
     const gender = (onboardingStep1?.gender || user?.gender || '').toLowerCase();
@@ -113,24 +114,29 @@ const Dashboard: React.FC = () => {
       bmi = weightKg / (heightM * heightM);
     }
 
-    // BMR (Mifflin-St Jeor)
-    let tdee: number | null = null;
-    if (weightKg && heightM) {
+    // Prioritize AI-predicted calories over calculated TDEE
+    let calories: number | null = null;
+    
+    if (aiAssessment?.predicted_calories) {
+      // Use AI-predicted calories (most accurate, considers goals and medical conditions)
+      calories = aiAssessment.predicted_calories;
+    } else if (weightKg && heightM) {
+      // Fallback: Calculate TDEE using Mifflin-St Jeor equation
       const heightCm = heightM * 100;
-      const ageValue = (age === null || isNaN(age)) ? 30 : age; // fallback age if missing
+      const ageValue = (age === null || isNaN(age)) ? 30 : age;
       let bmr = 10 * weightKg + 6.25 * heightCm - 5 * ageValue;
       if (gender === 'male' || gender === 'm') bmr += 5;
       else if (gender === 'female' || gender === 'f') bmr -= 161;
-      // If gender unknown, keep neutral bmr
-      tdee = Math.round(bmr * activity);
+      calories = Math.round(bmr * activity);
     }
 
     return {
       bmiValue: bmi,
       bmiDisplay: bmi ? bmi.toFixed(1) : '—',
-      tdeeDisplay: tdee ? `${tdee} kcal` : '—',
+      tdeeDisplay: calories ? `${calories} kcal` : '—',
+      caloriesValue: calories, // Actual numeric value for nutrition module
     };
-  }, [onboardingStep1, onboardingStep2, user]);
+  }, [onboardingStep1, onboardingStep2, user, aiAssessment]);
 
   // Load dashboard data function
   const loadDashboardData = async () => {

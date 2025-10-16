@@ -96,12 +96,12 @@ export default function ProgressPage() {
       Promise.all([
         fetch(API_ENDPOINTS.NUTRITION.ACTIVITY, { method: 'POST', headers: authHeaders }),
         fetch(API_ENDPOINTS.PROGRESS.BADGES_CHECK, { method: 'POST', headers: authHeaders })
-          .then(res => res.json())
-          .then(data => {
+        .then(res => res.json())
+        .then(data => {
             if (data.newly_unlocked?.length > 0) {
-              setBadgeQueue(prev => [...prev, ...data.newly_unlocked]);
-            }
-          })
+            setBadgeQueue(prev => [...prev, ...data.newly_unlocked]);
+          }
+        })
       ]).catch(err => console.error('Background operations failed:', err));
       
       // Fetch critical data in parallel - optimized order

@@ -37,22 +37,47 @@ const RealtimeDashboard: React.FC = () => {
   const [showAiPanel, setShowAiPanel] = useState(false);
   const [hasCriticalAlerts, setHasCriticalAlerts] = useState(false);
 
-  const user = useMemo(() => {
-    try {
-      const raw = localStorage.getItem('user');
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  }, []);
+  const [user, setUser] = useState<any>(null);
+  const [onboardingStep1, setOnboardingStep1] = useState<any>(null);
 
-  const onboardingStep1 = useMemo(() => {
-    try {
-      const raw = localStorage.getItem('onboarding_step1');
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
+  // Load user and onboarding data
+  useEffect(() => {
+    const storedUser = (() => {
+      try {
+        const raw = localStorage.getItem('user');
+        return raw ? JSON.parse(raw) : null;
+      } catch {
+        return null;
+      }
+    })();
+    if (storedUser) {
+      setUser(storedUser);
     }
+    
+    // Load onboarding data for form users to get profile picture
+    const loadOnboardingData = async () => {
+      try {
+        const accessToken = localStorage.getItem('access_token');
+        if (!accessToken) return;
+        
+        const response = await fetch('/auth/onboarding/data', {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+          },
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data?.step1) {
+            setOnboardingStep1(data.step1);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load onboarding data:', error);
+      }
+    };
+    
+    loadOnboardingData();
   }, []);
 
   const handleLogout = () => {
@@ -318,12 +343,35 @@ const RealtimeDashboard: React.FC = () => {
             return isNaN(num) ? 0 : num;
           };
 
+          // Compact formatter for large numbers (e.g., 12.3K)
+          const formatCompact = (num: number) => {
+            try {
+              return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(num);
+            } catch {
+              // Fallback if Intl not available
+              if (num >= 1_000_000) return `${Math.round(num / 100_000) / 10}M`;
+              if (num >= 1_000) return `${Math.round(num / 100) / 10}K`;
+              return num.toLocaleString();
+            }
+          };
+
+          const formatDistance = (value: any) => {
+            const num = formatNumber(value);
+            if (num >= 100) return Math.round(num).toString();
+            if (num >= 10) return num.toFixed(1);
+            return num.toFixed(2);
+          };
+
+          // Pre-format values with overflow-safe number formatting
+          const stepsNum = formatNumber(data.steps);
+          const caloriesNum = formatNumber(data.calories);
+
           setMetrics({
             heartRate: { value: formatValue(data.heart_rate), unit: 'bpm', change: '+2%', changeType: 'positive' },
-            steps: { value: formatNumber(data.steps).toLocaleString(), unit: '', change: '+5%', changeType: 'positive' },
+            steps: { value: stepsNum >= 10000 ? formatCompact(stepsNum) : stepsNum.toLocaleString(), unit: '', change: '+5%', changeType: 'positive' },
             sleep: { value: data.sleep || '6h 45m', unit: '', change: '-10%', changeType: 'negative' },
-            calories: { value: formatNumber(data.calories).toLocaleString(), unit: 'kcal', change: '+3%', changeType: 'positive' },
-            distance: { value: formatValue(data.distance), unit: 'km', change: '+8%', changeType: 'positive' },
+            calories: { value: caloriesNum >= 10000 ? formatCompact(caloriesNum) : caloriesNum.toLocaleString(), unit: 'kcal', change: '+3%', changeType: 'positive' },
+            distance: { value: formatDistance(data.distance), unit: 'm', change: '+8%', changeType: 'positive' },
             bloodPressure: { value: data.blood_pressure || '120/80', unit: 'mmHg', change: '-3%', changeType: 'positive' },
             bloodGlucose: { value: formatValue(data.blood_glucose), unit: 'mg/dL', change: '+1%', changeType: 'positive' },
             oxygenSaturation: { value: formatValue(data.oxygen_saturation), unit: '%', change: '+0%', changeType: 'positive' },
@@ -530,7 +578,7 @@ const RealtimeDashboard: React.FC = () => {
     metric: HealthMetric;
     trendIcon: React.ReactNode;
   }> = ({ title, emoji, metric, trendIcon }) => (
-    <div className="w-full md:w-full bg-[#111827] border border-[#1F2937] rounded-xl p-6 flex flex-col hover:border-[#374151] transition-all duration-300 hover:shadow-lg hover:shadow-black/20 group">
+    <div className="w-full md:w-full bg-[#111827] border border-[#1F2937] rounded-xl p-6 flex flex-col hover:border-[#374151] transition-all duration-300 hover:shadow-lg hover:shadow-black/20 group min-w-0">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-base font-medium text-white/90 group-hover:text-white transition-colors">{title}</h3>
         <div className="text-3xl group-hover:scale-110 transition-transform duration-300">
@@ -538,11 +586,11 @@ const RealtimeDashboard: React.FC = () => {
         </div>
       </div>
       
-      <div className="flex-1 flex flex-col justify-center">
-        <div className="flex items-baseline gap-2 mb-5">
-          <span className="text-3xl font-bold text-white group-hover:text-white transition-colors">{metric.value}</span>
+      <div className="flex-1 flex flex-col justify-center min-w-0">
+        <div className="flex items-baseline gap-2 mb-5 min-w-0">
+          <span className="text-3xl font-bold text-white group-hover:text-white transition-colors truncate max-w-[9ch] sm:max-w-[12ch]">{metric.value}</span>
           {metric.unit && (
-            <span className="text-base text-[#9CA3AF] group-hover:text-[#D1D5DB] transition-colors">{metric.unit}</span>
+            <span className="text-base text-[#9CA3AF] group-hover:text-[#D1D5DB] transition-colors shrink-0">{metric.unit}</span>
           )}
         </div>
         
@@ -769,7 +817,7 @@ const RealtimeDashboard: React.FC = () => {
               />
               
               <MetricCard
-                title="Calories Burned"
+                title="Calories"
                 emoji="🔥"
                 metric={metrics.calories}
                 trendIcon={

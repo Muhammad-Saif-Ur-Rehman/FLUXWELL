@@ -43,6 +43,7 @@ const OnboardingStep3: React.FC<OnboardingStep3Props> = ({
           motivational_message: assessment.motivational_message,
           health_score: assessment.health_score,
           risk_profile: assessment.risk_profile,
+          predicted_calories: assessment.predicted_calories,  // Include AI-predicted calories
           generated_at: new Date().toISOString()
         }),
       });
@@ -79,7 +80,8 @@ const OnboardingStep3: React.FC<OnboardingStep3Props> = ({
               time_to_goal: data.ai_assessment.time_to_goal,
               motivational_message: data.ai_assessment.motivational_message,
               health_score: data.ai_assessment.health_score,
-              risk_profile: data.ai_assessment.risk_profile
+              risk_profile: data.ai_assessment.risk_profile,
+              predicted_calories: data.ai_assessment.predicted_calories || 2000  // Fallback to 2000 if missing
             });
             setIsLoadingAssessment(false);
             return true; // Found existing assessment

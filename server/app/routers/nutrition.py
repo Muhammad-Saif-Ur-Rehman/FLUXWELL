@@ -445,13 +445,31 @@ def _sanitize_for_json(obj: Any) -> Any:
 
 def _seed_default_macros(user_id: str, profile: Dict[str, Any]) -> dict:
     now = _now()
-    # Basic estimation based on meals/snacks
-    meals = int(profile.get("meals_per_day") or 3)
-    snacks = int(profile.get("snacks_per_day") or 0)
-    calories = 1800 + meals * 150 + snacks * 100
-    protein = 90 + meals * 10
-    carbs = 200 + meals * 20
-    fats = 60 + meals * 5
+    
+    # Try to get AI-predicted calories from onboarding data first
+    calories = 2000  # Safe default
+    try:
+        user = db.users.find_one({"_id": _oid(user_id)})
+        if user and user.get("onboarding") and user["onboarding"].get("ai_assessment"):
+            ai_assessment = user["onboarding"]["ai_assessment"]
+            if ai_assessment.get("predicted_calories"):
+                calories = int(ai_assessment["predicted_calories"])
+                print(f"Using AI-predicted calories: {calories} for user {user_id}")
+    except Exception as e:
+        print(f"Could not get AI-predicted calories, using estimation: {e}")
+    
+    # If no AI calories found, estimate based on meals/snacks (fallback)
+    if calories == 2000:
+        meals = int(profile.get("meals_per_day") or 3)
+        snacks = int(profile.get("snacks_per_day") or 0)
+        calories = 1800 + meals * 150 + snacks * 100
+        print(f"Using estimated calories based on meals/snacks: {calories}")
+    
+    # Calculate macros based on calories (40% carbs, 30% protein, 30% fat)
+    protein = int((calories * 0.30) / 4)  # 4 cal per gram protein
+    carbs = int((calories * 0.40) / 4)  # 4 cal per gram carbs
+    fats = int((calories * 0.30) / 9)  # 9 cal per gram fat
+    
     default_doc = {
         "user_id": _oid(user_id),
         "calories": calories,
@@ -1096,7 +1114,7 @@ def delete_meal(meal_id: str, user_id: str = Depends(get_current_user_id)):
     return {"deleted": True}
 
 # ---------- Water logs ----------
-@router.post("/water", response_model=WaterLogOut)
+@router.post("/water")
 def add_water(payload: WaterLogIn, user_id: str = Depends(get_current_user_id)):
     now = _now()
     ts = payload.timestamp or now
@@ -1107,7 +1125,25 @@ def add_water(payload: WaterLogIn, user_id: str = Depends(get_current_user_id)):
     # Auto-sync water data to progress tracking
     _sync_water_to_progress(user_id)
     
-    return WaterLogOut(id=str(saved["_id"]), user_id=str(saved["user_id"]), amount_ml=saved["amount_ml"], timestamp=saved["timestamp"], created_at=saved["created_at"])
+    # Calculate today's total for optimized frontend response
+    today_start = datetime.combine(datetime.utcnow().date(), datetime.min.time())
+    today_end = today_start + timedelta(days=1)
+    pipeline = [
+        {"$match": {"user_id": _oid(user_id), "timestamp": {"$gte": today_start, "$lt": today_end}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount_ml"}}}
+    ]
+    agg_res = list(db.water_logs.aggregate(pipeline))
+    total_ml = agg_res[0]["total"] if agg_res else payload.amount_ml
+    
+    # Return both the log entry and today's total
+    return {
+        "id": str(saved["_id"]), 
+        "user_id": str(saved["user_id"]), 
+        "amount_ml": saved["amount_ml"], 
+        "timestamp": saved["timestamp"], 
+        "created_at": saved["created_at"],
+        "total_ml": total_ml  # Include today's total to avoid second API call
+    }
 
 @router.get("/streak")
 def get_streak(user_id: str = Depends(get_current_user_id)):
@@ -1324,9 +1360,21 @@ async def meal_swap(req: MealSwapRequest = Body(...), user_id: str = Depends(get
                     base_prompt = "Propose distinct, healthy meal alternatives that are nutritionally balanced for main meals. "
                     base_prompt += "Focus on complete, satisfying meals suitable for breakfast, lunch, or dinner. "
 
-                # Get user profile for cuisine preferences
+                # Get user profile for cuisine preferences and dietary restrictions
                 user_profile = _sanitize_for_json(_get_nutrition_profile(user_id) or {})
                 favorite_cuisines = user_profile.get("favorite_cuisines", [])
+                allergies = user_profile.get("allergies", [])
+                disliked_foods = user_profile.get("disliked_foods", "")
+                
+                # Build dietary restrictions text
+                restrictions_text = ""
+                if allergies or disliked_foods:
+                    restrictions_parts = []
+                    if allergies:
+                        restrictions_parts.append(f"ALLERGIES (MUST AVOID): {', '.join(allergies)}")
+                    if disliked_foods:
+                        restrictions_parts.append(f"DISLIKED FOODS (AVOID): {disliked_foods}")
+                    restrictions_text = "\n\nDIETARY RESTRICTIONS:\n" + "\n".join(restrictions_parts)
 
                 system = f"""You are a JSON-only AI assistant for meal alternatives. You MUST output ONLY valid JSON array. No explanations, no markdown, no text before or after.
 
@@ -1366,6 +1414,13 @@ EXACT FORMAT:
   }}
 ]
 
+CRITICAL CALORIE REQUIREMENTS:
+- Target calories for this {req.meal_type}: {target_cal if target_cal else "as per current meal"} kcal
+- ALL alternatives MUST match this calorie target (±20 kcal tolerance)
+- Calculate macros to match exact calorie target
+- Protein: 4 cal/g, Carbs: 4 cal/g, Fats: 9 cal/g
+- Verify: (protein_g × 4) + (carbs_g × 4) + (fats_g × 9) ≈ calories
+
 CRITICAL RULES:
 - ONLY output the JSON array
 - NO text before [
@@ -1378,7 +1433,8 @@ CRITICAL RULES:
 - Use different proteins, vegetables, and cooking methods for each alternative
 - Ingredients must have quantities (e.g., "200g chicken", "1 cup rice")
 - Steps must be concise with times
-- Return exactly 3 meal alternatives"""
+- Return exactly 3 meal alternatives
+- STRICTLY match the calorie target{restrictions_text}"""
                 n = min(max(req.alternatives_count or 3, 1), 5)
                 payload = {
                     "meal_type": req.meal_type,
@@ -1387,6 +1443,8 @@ CRITICAL RULES:
                     "macro_targets": macros,
                     "count": n,
                     "user_cuisines": favorite_cuisines,
+                    "allergies": allergies,
+                    "disliked_foods": disliked_foods,
                     "random_seed": str(datetime.utcnow().timestamp()),
                     "meal_context": "snack" if "snack" in meal_type_lower else "meal",
                 }
@@ -1583,11 +1641,15 @@ CRITICAL RULES:
         key = "snacks" if is_snack else "plan"
         entries = list(doc.get(key, []))
 
-        # Find target index: prefer exact title match; fallback to first index of same meal_type; else index 0
+        # Find target index: prefer slot_index (highest priority), then exact title match, then meal_type match
         target_idx = -1
+        
+        # Priority 1: Use provided slot_index (highest priority - most accurate)
         if isinstance(req.slot_index, int) and 0 <= req.slot_index < len(entries):
             target_idx = req.slot_index
-        if req.current_meal_title:
+        
+        # Priority 2: Match exact title (only if slot_index not provided)
+        if target_idx < 0 and req.current_meal_title:
             for i, e in enumerate(entries):
                 try:
                     if (e.get("title") or "").strip().lower() == req.current_meal_title.strip().lower():
@@ -1595,6 +1657,8 @@ CRITICAL RULES:
                         break
                 except Exception:
                     continue
+        
+        # Priority 3: Match meal_type (only if slot_index and title not found)
         if target_idx < 0 and meal_type_norm:
             for i, e in enumerate(entries):
                 try:
@@ -1603,6 +1667,8 @@ CRITICAL RULES:
                         break
                 except Exception:
                     continue
+        
+        # Priority 4: Default to first entry
         if target_idx < 0:
             target_idx = 0 if entries else -1
 
@@ -2136,71 +2202,99 @@ async def _generate_plan_with_llm(state: DietAgentState, regenerate_snacks: bool
         "recent_feedback": [m.get("notes") for m in meal_logs if m.get("notes")],
     }
  
-    system_prompt = """You are a JSON-only AI assistant. You MUST output ONLY valid JSON. No explanations, no markdown, no text before or after.
+    # Calculate per-meal calorie distribution
+    total_calories = macros.get("calories", 2000)
+    meals_count = profile.get("meals_per_day", 3)
+    snacks_count = profile.get("snacks_per_day", 2)
+    
+    # Distribute calories: 70% for meals, 30% for snacks
+    meal_calories_total = int(total_calories * 0.70)
+    snack_calories_total = int(total_calories * 0.30)
+    
+    # Calculate per-item calories
+    cal_per_meal = meal_calories_total // meals_count if meals_count > 0 else 500
+    cal_per_snack = snack_calories_total // snacks_count if snacks_count > 0 else 200
+    
+    # Distribution: Breakfast 25%, Lunch 40%, Dinner 35%
+    breakfast_cal = int(meal_calories_total * 0.25)
+    lunch_cal = int(meal_calories_total * 0.40)
+    dinner_cal = int(meal_calories_total * 0.35)
+    
+    system_prompt = f"""You are a JSON-only AI assistant. You MUST output ONLY valid JSON. No explanations, no markdown, no text before or after.
 
-REQUIRED: Pure JSON object starting with { and ending with }
+REQUIRED: Pure JSON object starting with {{ and ending with }}
 
 EXACT FORMAT:
-{
+{{
   "daily_plan": [
-    {
+    {{
       "meal_type": "breakfast",
       "title": "Breakfast Name",
-      "calories": 400,
+      "calories": {breakfast_cal},
       "protein_g": 20,
       "carbs_g": 40,
       "fats_g": 16,
       "ingredients": ["200g chicken breast", "1 cup rice", "1 cup vegetables"],
       "steps": ["Cook rice 15 min", "Grill chicken 8 min per side", "Steam vegetables 5 min"]
-    },
-    {
+    }},
+    {{
       "meal_type": "lunch",
       "title": "Lunch Name",
-      "calories": 500,
+      "calories": {lunch_cal},
       "protein_g": 30,
       "carbs_g": 45,
       "fats_g": 20,
       "ingredients": ["250g fish fillet", "1 cup quinoa", "2 cups salad greens"],
       "steps": ["Cook quinoa 15 min", "Bake fish at 200°C for 12 min", "Prepare salad"]
-    },
-    {
+    }},
+    {{
       "meal_type": "dinner",
       "title": "Dinner Name",
-      "calories": 550,
+      "calories": {dinner_cal},
       "protein_g": 35,
       "carbs_g": 50,
       "fats_g": 22,
       "ingredients": ["200g beef steak", "2 medium potatoes", "200g broccoli"],
       "steps": ["Bake potatoes at 200°C for 45 min", "Grill steak 4 min per side", "Steam broccoli 8 min"]
-    }
+    }}
   ],
   "snack_plan": [
-    {
+    {{
       "meal_type": "snack",
       "title": "Snack Name",
-      "calories": 200,
+      "calories": {cal_per_snack},
       "protein_g": 10,
       "carbs_g": 25,
       "fats_g": 8,
       "ingredients": ["1 cup yogurt", "1/2 cup fruit", "2 tbsp nuts"],
       "steps": ["Mix yogurt with fruit", "Top with nuts"]
-    }
+    }}
   ],
   "water_goal_ml": 2500,
   "grocery_list": ["chicken", "rice", "vegetables", "fish", "quinoa", "salad greens", "beef", "potatoes", "broccoli", "yogurt", "fruit", "nuts"]
-}
+}}
+
+CRITICAL CALORIE REQUIREMENTS:
+- TOTAL DAILY CALORIES MUST BE: {total_calories} kcal (±50 kcal tolerance)
+- Breakfast MUST be: {breakfast_cal} kcal (±30 kcal)
+- Lunch MUST be: {lunch_cal} kcal (±30 kcal)  
+- Dinner MUST be: {dinner_cal} kcal (±30 kcal)
+- Each snack MUST be: {cal_per_snack} kcal (±20 kcal)
+- Calculate macros to match these exact calorie targets
+- Protein: 4 cal/g, Carbs: 4 cal/g, Fats: 9 cal/g
+- Verify: (protein_g × 4) + (carbs_g × 4) + (fats_g × 9) = calories for each meal
 
 CRITICAL RULES:
 - ONLY output the JSON object
-- NO text before {
-- NO text after }
+- NO text before {{
+- NO text after }}
 - NO markdown
 - NO explanations
 - NO code blocks
 - NO "Here is..." or "Response:" text
 - Ingredients must have quantities (e.g., "200g chicken", "1 cup rice")
 - Steps must be concise with times
-- Calorie values must be realistic numbers between 200-800"""
+- STRICTLY follow the calorie distribution above"""
 
     # Build comprehensive user payload
     user_payload = {
@@ -2216,7 +2310,11 @@ CRITICAL RULES:
             "activity_level": profile.get("activity_level", "moderate"),
         },
         "nutrition_goals": {
-            "calories": macros.get("calories", 2000),
+            "total_calories": total_calories,
+            "breakfast_calories": breakfast_cal,
+            "lunch_calories": lunch_cal,
+            "dinner_calories": dinner_cal,
+            "snack_calories": cal_per_snack,
             "protein_g": macros.get("protein_g", 150),
             "carbs_g": macros.get("carbs_g", 250),
             "fats_g": macros.get("fats_g", 67),
@@ -2231,6 +2329,7 @@ CRITICAL RULES:
             "include_grocery_list": True,
             "detailed_recipes": True,
             "nutritional_breakdown": True,
+            "strict_calorie_matching": True,
         }
     }
  

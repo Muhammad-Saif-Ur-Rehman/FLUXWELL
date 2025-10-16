@@ -19,6 +19,7 @@ export default function NutritionPage() {
   const [groceryItems, setGroceryItems] = useState<string[]>([]);
   const [nutritionProfile, setNutritionProfile] = useState<NutritionProfile | null>(null);
   const [user, setUser] = useState<any>(null);
+  const [onboardingStep1, setOnboardingStep1] = useState<{ profile_picture_url?: string } | null>(null);
   const [agentSuggestions, setAgentSuggestions] = useState<string[]>([]);
   const [agentPlan, setAgentPlan] = useState<{ plan: AgentPlan[]; snacks: AgentPlan[] } | null>(null);
   const [isRefreshingPlan, setIsRefreshingPlan] = useState(false);
@@ -27,7 +28,7 @@ export default function NutritionPage() {
   const [activeRecipe, setActiveRecipe] = useState<{ title: string; steps: string[]; ingredients: string[] } | null>(null);
   const [isRecipeOpen, setIsRecipeOpen] = useState(false);
   const [planMacros, setPlanMacros] = useState<{ calories: number; protein_g: number; carbs_g: number; fats_g: number } | null>(null);
-  const [swapContext, setSwapContext] = useState<{ open: boolean; mealType?: string; currentTitle?: string; kcal?: number; options: string[]; alternatives?: any[] }>({ open: false, options: [], alternatives: [] });
+  const [swapContext, setSwapContext] = useState<{ open: boolean; mealType?: string; currentTitle?: string; kcal?: number; options: string[]; alternatives?: any[]; slotIndex?: number; isSnack?: boolean }>({ open: false, options: [], alternatives: [] });
   const [planState, setPlanState] = useState<'none' | 'generated' | 'saved'>('none');
 
   const loadAgentPlan = useCallback(async (force = false) => {
@@ -201,11 +202,37 @@ export default function NutritionPage() {
     }
   }, []);
 
-  const handleSwap = useCallback(async (slotLabel: string) => {
+  const handleSwap = useCallback(async (slotLabel: string, slotIndex?: number) => {
     try {
-      const current = (agentPlan?.plan || []).concat(agentPlan?.snacks || []).find(m => (m.meal_type || '').toLowerCase() === (slotLabel || '').toLowerCase());
+      // Determine if this is a snack or meal and find the correct item and index
+      const isSnack = slotLabel.toLowerCase().includes('snack');
+      const sourceArray = isSnack ? (agentPlan?.snacks || []) : (agentPlan?.plan || []);
+      
+      // Find the item by exact label match first
+      let current: any = null;
+      let actualIndex = -1;
+      
+      if (typeof slotIndex === 'number' && slotIndex >= 0 && slotIndex < sourceArray.length) {
+        // Use provided index if valid
+        current = sourceArray[slotIndex];
+        actualIndex = slotIndex;
+      } else {
+        // Find by label match
+        actualIndex = sourceArray.findIndex(m => (m.meal_type || '').toLowerCase() === (slotLabel || '').toLowerCase());
+        if (actualIndex >= 0) {
+          current = sourceArray[actualIndex];
+        }
+      }
+      
       const kcal = current?.calories || undefined;
-      const resp = await NutritionService.mealSwap({ meal_type: slotLabel, current_meal_title: current?.title, alternatives_count: 3, desired_profile: kcal ? { calories: kcal } : undefined });
+      const resp = await NutritionService.mealSwap({ 
+        meal_type: slotLabel, 
+        current_meal_title: current?.title, 
+        alternatives_count: 3, 
+        desired_profile: kcal ? { calories: kcal } : undefined,
+        slot_index: actualIndex >= 0 ? actualIndex : undefined,
+        is_snack: isSnack
+      });
 
       console.log('Swap response:', resp);
 
@@ -234,7 +261,16 @@ export default function NutritionPage() {
         return;
       }
 
-      setSwapContext({ open: true, mealType: slotLabel, currentTitle: current?.title, kcal, options: opts.slice(0, 3), alternatives });
+      setSwapContext({ 
+        open: true, 
+        mealType: slotLabel, 
+        currentTitle: current?.title, 
+        kcal, 
+        options: opts.slice(0, 3), 
+        alternatives,
+        slotIndex: actualIndex >= 0 ? actualIndex : undefined,
+        isSnack
+      });
     } catch (e) {
       console.error('Failed to fetch swap alternatives', e);
       alert('Failed to fetch meal alternatives. Please try again.');
@@ -253,7 +289,9 @@ export default function NutritionPage() {
       const result = await NutritionService.mealSwap({
         meal_type: swapContext.mealType,
         current_meal_title: swapContext.currentTitle,
-        swap_in_meal: selectedAlternative || { title: choice }
+        swap_in_meal: selectedAlternative || { title: choice },
+        slot_index: swapContext.slotIndex,
+        is_snack: swapContext.isSnack
       });
 
       if (result?.plan || result?.snacks) {
@@ -282,7 +320,7 @@ export default function NutritionPage() {
     } finally {
       setSwapContext({ open: false, options: [], alternatives: [] });
     }
-  }, [swapContext.mealType, swapContext.currentTitle, swapContext.alternatives]);
+  }, [swapContext.mealType, swapContext.currentTitle, swapContext.alternatives, swapContext.slotIndex, swapContext.isSnack]);
 
   const navigate = useNavigate();
   const waterGoalMl = waterGoal ?? 2000; // Default should match backend default
@@ -299,6 +337,31 @@ export default function NutritionPage() {
     if (storedUser) {
       setUser(storedUser);
     }
+    
+    // Load onboarding data for form users to get profile picture
+    const loadOnboardingData = async () => {
+      try {
+        const accessToken = localStorage.getItem('access_token');
+        if (!accessToken) return;
+        
+        const response = await fetch('/auth/onboarding/data', {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+          },
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data?.step1) {
+            setOnboardingStep1(data.step1);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load onboarding data:', error);
+      }
+    };
+    
+    loadOnboardingData();
   }, []);
 
   useEffect(() => {
@@ -527,16 +590,25 @@ export default function NutritionPage() {
 
   const handleAddWater = async (amount: number) => {
     try {
-      await NutritionService.addWater(amount);
-      const w = await NutritionService.waterToday();
-      setWaterMl(w.total_ml || 0);
-      // Water goal is managed by the agent plan, not by daily water tracking
+      // Optimistically update UI immediately
+      setWaterMl(prev => prev + amount);
+      
+      // Make API call in background
+      const result = await NutritionService.addWater(amount);
+      
+      // Update with actual value from server
+      if (result && typeof result.total_ml === 'number') {
+        setWaterMl(result.total_ml);
+      }
     } catch (e) {
       console.error('Failed to add water', e);
+      // Revert optimistic update on error
+      const w = await NutritionService.waterToday().catch(() => ({ total_ml: waterMl }));
+      setWaterMl(w.total_ml || waterMl);
     }
   };
 
-  const handleLogMeal = useCallback(async (mealType: string) => {
+  const handleLogMeal = useCallback(async (mealType: string, slotIndex?: number) => {
     // Only allow logging if plan exists, is valid, and is saved
     if (!agentPlan || (agentPlan.plan.length === 0 && agentPlan.snacks.length === 0)) {
       alert('Please generate a meal plan before logging meals.');
@@ -549,18 +621,55 @@ export default function NutritionPage() {
     }
 
     try {
-      // Find the planned meal for this meal type
-      const current = (agentPlan?.plan || []).concat(agentPlan?.snacks || []).find(m =>
-        (m.meal_type || '').toLowerCase() === (mealType || '').toLowerCase()
-      );
+      // Determine if this is a snack or meal
+      const isSnack = mealType.toLowerCase().includes('snack');
+      const sourceArray = isSnack ? (agentPlan?.snacks || []) : (agentPlan?.plan || []);
+      
+      // Find the correct planned meal/snack
+      let current: any = null;
+      
+      if (typeof slotIndex === 'number' && slotIndex >= 0 && slotIndex < sourceArray.length) {
+        // Use provided index for accurate selection (critical for snacks)
+        current = sourceArray[slotIndex];
+      } else {
+        // Fallback: find by meal_type match (works for meals like "Breakfast", "Lunch", "Dinner")
+        current = (agentPlan?.plan || []).concat(agentPlan?.snacks || []).find(m =>
+          (m.meal_type || '').toLowerCase() === (mealType || '').toLowerCase()
+        );
+      }
 
       if (!current) {
-        console.error('No planned meal found for:', mealType);
+        console.error('No planned meal found for:', mealType, 'at index:', slotIndex);
         return;
       }
 
-      // Log the meal with planned details
-      await NutritionService.createMeal({
+      // Optimistically update UI state to show as logged immediately
+      const optimisticUpdate = () => {
+        const today = new Date().toISOString().split('T')[0];
+        const newMeal: MealLog = {
+          id: `temp-${Date.now()}`,
+          user_id: user?.id || '',
+          meal_type: mealType,
+          timestamp: new Date().toISOString(),
+          items: [{
+            name: current.title || mealType,
+            calories: current.calories || 0,
+            protein_g: current.protein_g || 0,
+            carbs_g: current.carbs_g || 0,
+            fats_g: current.fats_g || 0,
+          }],
+          notes: `Logged from planned meal: ${current.title}`,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        setMeals(prev => [...prev, newMeal]);
+      };
+
+      // Apply optimistic update for instant feedback
+      optimisticUpdate();
+
+      // Log the meal with planned details (async in background)
+      const logPromise = NutritionService.createMeal({
         meal_type: mealType,
         timestamp: new Date().toISOString(),
         items: [{
@@ -573,13 +682,18 @@ export default function NutritionPage() {
         notes: `Logged from planned meal: ${current.title}`,
       });
 
-      // Refresh data
-      await handleMealLogged();
+      // Refresh data in background
+      logPromise.then(() => handleMealLogged()).catch((error) => {
+        console.error('Failed to log meal:', error);
+        alert('Failed to log meal. Please try again.');
+        // Revert optimistic update on error
+        handleMealLogged();
+      });
     } catch (error) {
       console.error('Failed to log meal:', error);
       alert('Failed to log meal. Please try again.');
     }
-  }, [agentPlan, planState]);
+  }, [agentPlan, planState, user]);
 
   const handleMealLogged = useCallback(async () => {
     try {
@@ -756,7 +870,21 @@ export default function NutritionPage() {
     navigate('/');
   };
 
-  const profileImage = user?.profile_picture_url || null;
+  // Profile image logic: check social providers first, then form user onboarding data
+  const profileImage = useMemo(() => {
+    if (!user) return null;
+    const provider = user.auth_provider;
+    // For social login users (Google/Fitbit), use their profile picture
+    if (provider === 'google' || provider === 'fitbit') {
+      return user.profile_picture_url || null;
+    }
+    // For form users, use onboarding step1 profile picture
+    if (provider === 'form') {
+      return onboardingStep1?.profile_picture_url || null;
+    }
+    return null;
+  }, [user, onboardingStep1]);
+  
   const userInitial = (user?.full_name || '').trim().charAt(0).toUpperCase() || 'U';
 
   const totalTargets = mealsTarget + snacksTarget;
@@ -845,12 +973,14 @@ export default function NutritionPage() {
                         {isSavingPlan ? 'Saving...' : 'Save Plan'}
                       </button>
                     )}
-                    <button
-                      onClick={regeneratePlan}
-                      className="px-3 py-1 rounded-lg border border-white/20 text-xs text-gray-300 hover:bg-white/10"
-                    >
-                      Regenerate
-                    </button>
+                    {planState !== 'saved' && (
+                      <button
+                        onClick={regeneratePlan}
+                        className="px-3 py-1 rounded-lg border border-white/20 text-xs text-gray-300 hover:bg-white/10"
+                      >
+                        Regenerate
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -893,7 +1023,7 @@ export default function NutritionPage() {
                           <div className="flex items-center gap-2">
                             {planState === 'saved' && (
                               <button
-                                onClick={() => handleLogMeal(slot.label)}
+                                onClick={() => handleLogMeal(slot.label, idx)}
                                 disabled={slot.logged}
                                 className={`px-3 py-2 rounded-lg text-xs font-semibold border ${
                                   slot.logged
@@ -906,7 +1036,7 @@ export default function NutritionPage() {
                             )}
                             {planState === 'generated' && slot.plan && (
                               <button
-                                onClick={() => handleSwap(slot.label)}
+                                onClick={() => handleSwap(slot.label, idx)}
                                 className="px-3 py-2 rounded-lg text-xs font-semibold border border-white/30 text-gray-200 hover:bg-white/10"
                               >
                                 Swap
@@ -994,7 +1124,7 @@ export default function NutritionPage() {
                               <div className="flex items-center gap-2">
                                 {planState === 'saved' && (
                                   <button
-                                    onClick={() => handleLogMeal(slot.label)}
+                                    onClick={() => handleLogMeal(slot.label, idx)}
                                     disabled={slot.logged}
                                     className={`px-3 py-2 rounded-lg text-xs font-semibold border ${
                                       slot.logged
@@ -1007,7 +1137,7 @@ export default function NutritionPage() {
                                 )}
                                 {planState === 'generated' && slot.plan && (
                                   <button
-                                    onClick={() => handleSwap(slot.label)}
+                                    onClick={() => handleSwap(slot.label, idx)}
                                     className="px-3 py-2 rounded-lg text-xs font-semibold border border-white/30 text-gray-200 hover:bg-white/10"
                                   >
                                     Swap

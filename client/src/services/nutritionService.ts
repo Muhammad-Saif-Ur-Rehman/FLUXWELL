@@ -151,7 +151,7 @@ export const NutritionService = {
     return resp.blob();
   },
 
-  async mealSwap(payload: { meal_id?: string; reason?: string; desired_profile?: Record<string, any>; meal_type?: string; current_meal_title?: string; alternatives_count?: number; swap_in_title?: string; swap_in_meal?: any }): Promise<MealSwapResponse> {
+  async mealSwap(payload: { meal_id?: string; reason?: string; desired_profile?: Record<string, any>; meal_type?: string; current_meal_title?: string; alternatives_count?: number; swap_in_title?: string; swap_in_meal?: any; slot_index?: number; is_snack?: boolean }): Promise<MealSwapResponse> {
     const resp = await fetch(API_ENDPOINTS.NUTRITION.MEAL_SWAP, { method: 'POST', headers: authHeaders(), body: JSON.stringify(payload) });
     if (!resp.ok) throw new Error("Failed to fetch meal swap suggestions");
     return resp.json();

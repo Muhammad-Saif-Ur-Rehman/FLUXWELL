@@ -18,6 +18,7 @@ from langgraph.prebuilt import ToolNode
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_groq import ChatGroq
+from groq import AsyncGroq
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnableConfig
 
@@ -68,6 +69,8 @@ class LangGraphChatService:
                 timeout=30.0,
                 max_retries=3
             )
+            # Raw Groq client for multimodal calls
+            self.raw_groq = AsyncGroq(api_key=api_key)
             
             # Initialize enhanced checkpointer with better memory management
             self.checkpointer = MemorySaver()
@@ -338,16 +341,41 @@ class LangGraphChatService:
             processed_message = user_message or "Voice message processed"
         
         elif mode == "image" and file_data:
-            # Image processing
+            # Image processing with embedding (no vector DB retrieval)
+            logger.info("Processing image via HF_IMAGE_SPACE embedding (no DB retrieval)")
             processed_message = user_message or "Analyze this fitness-related image and provide helpful advice."
+            
+            # Get image data and embed it (for feature extraction/validation only)
+            try:
+                if file_data.get("image_bytes"):
+                    # Use raw bytes if available
+                    image_bytes = file_data["image_bytes"]
+                elif file_data.get("image_data"):
+                    # Decode base64 if that's what we have
+                    import base64
+                    image_bytes = base64.b64decode(file_data["image_data"])
+                else:
+                    logger.warning("No image data found in file_data")
+                    image_bytes = None
+                
+                if image_bytes:
+                    # Embed image using HF_IMAGE_SPACE (no further retrieval)
+                    logger.info(f"Embedding image of size {len(image_bytes)} bytes")
+                    _ = embed_image_bytes(image_bytes)
+                    logger.info("Image embedding completed (no vector search performed)")
+                        
+            except Exception as e:
+                logger.error(f"Error processing image embedding: {e}")
+                # Continue without image context
         
         # Create human message
         human_msg = HumanMessage(content=processed_message)
         
-        return {
+        result = {
             "user_message": processed_message,
             "messages": [human_msg]
         }
+        return result
     
     async def _retrieve_context_parallel_node(self, state: ChatState) -> Dict[str, Any]:
         """Retrieve RAG context with parallel processing and enhanced error handling"""
@@ -474,6 +502,7 @@ class LangGraphChatService:
         memory_context = state.get("memory_context", "")
         rag_context = state.get("rag_context", "")
         has_quality_context = state.get("has_quality_context", False)
+        file_data = state.get("file_data")
         
         # Build system prompt
         base_personality = f"""You are Fluxie, an expert AI fitness coach with deep knowledge in exercise science, nutrition, and wellness. Your coaching style is {style}.
@@ -495,6 +524,16 @@ VOICE INTERACTION GUIDELINES:
 - Ask follow-up questions when appropriate
 - Avoid overly technical jargon unless necessary
 - Structure answers clearly with 2-3 numbered points maximum"""
+        elif mode == "image":
+            system_msg = f"""{base_personality}
+
+IMAGE ANALYSIS GUIDELINES:
+- You are analyzing a fitness/nutrition related image
+- Provide detailed, helpful analysis based on what you can understand from the context
+- Give specific, actionable advice related to the image
+- Reference form, technique, nutrition, or other relevant aspects
+- Be encouraging and constructive in your feedback
+ - Focus on the user's question and describe what is likely in the image based on provided content"""
         else:
             system_msg = f"""{base_personality}
 
@@ -511,7 +550,7 @@ INTERACTION GUIDELINES:
             system_msg += f"""
 
 KNOWLEDGE BASE CONTEXT AVAILABLE:
-You have access to high-quality, relevant information from our fitness knowledge base (similarity score ≥ 0.65).
+You have access to high-quality, relevant information from our fitness knowledge base.
 - PRIORITIZE the provided context information as it's highly relevant to the user's question
 - Use the context as your PRIMARY source for answering
 - Supplement with your training knowledge only to enhance or clarify the context
@@ -521,7 +560,7 @@ You have access to high-quality, relevant information from our fitness knowledge
             system_msg += f"""
 
 KNOWLEDGE BASE CONTEXT:
-No high-quality matches found in our knowledge base (all similarity scores < 0.65).
+No high-quality matches found in our knowledge base.
 - Rely on your comprehensive training in fitness, nutrition, and wellness
 - Provide expert-level advice based on current best practices
 - Use evidence-based recommendations
@@ -541,20 +580,55 @@ No high-quality matches found in our knowledge base (all similarity scores < 0.6
 
 User's Question: {user_message}
 
-Instructions: {"Use the above knowledge base information as your primary source since it has high similarity scores (≥ 0.65). " if has_quality_context else "Answer using your comprehensive fitness knowledge. "}If conversation memory is available, use it to personalize your response and maintain context from previous interactions."""
+Instructions: {"Use the above knowledge base information as your primary source. " if has_quality_context else "Answer using your comprehensive fitness knowledge. "}If conversation memory is available, use it to personalize your response and maintain context from previous interactions."""
 
         try:
-            # Generate response with retry logic
+            # If image mode, send multimodal payload directly to Groq model
+            if mode == "image" and file_data and (file_data.get("image_data") or file_data.get("image_bytes")):
+                try:
+                    import base64
+                    if file_data.get("image_data"):
+                        data_url = f"data:{file_data.get('type','image/png')};base64,{file_data['image_data']}"
+                    else:
+                        encoded = base64.b64encode(file_data["image_bytes"]).decode("utf-8")
+                        data_url = f"data:{file_data.get('type','image/png')};base64,{encoded}"
+
+                    mm_messages = [
+                        {"role": "system", "content": system_msg},
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": full_prompt},
+                                {"type": "image_url", "image_url": {"url": data_url}},
+                            ],
+                        },
+                    ]
+
+                    resp = await self.raw_groq.chat.completions.create(
+                        model="meta-llama/llama-4-maverick-17b-128e-instruct",
+                        messages=mm_messages,
+                        temperature=0.4,
+                        max_tokens=512,
+                        top_p=0.9,
+                    )
+                    ai_response = resp.choices[0].message.content
+                except Exception as e:
+                    logger.warning(f"Multimodal LLM call failed, falling back to text-only: {e}")
+                    ai_response = None
+            else:
+                ai_response = None
+
+            # Generate response with retry logic (text/voice or image fallback)
             max_retries = 3
             for attempt in range(max_retries):
                 try:
-                    messages = [
-                        SystemMessage(content=system_msg),
-                        HumanMessage(content=full_prompt)
-                    ]
-                    
-                    response = await self.groq_client.ainvoke(messages)
-                    ai_response = response.content
+                    if ai_response is None:
+                        messages = [
+                            SystemMessage(content=system_msg),
+                            HumanMessage(content=full_prompt)
+                        ]
+                        response = await self.groq_client.ainvoke(messages)
+                        ai_response = response.content
                     
                     if not ai_response or ai_response.strip() == "":
                         raise ValueError("Empty response from LLM")

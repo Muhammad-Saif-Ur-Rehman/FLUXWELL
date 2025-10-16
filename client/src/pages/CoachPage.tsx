@@ -437,22 +437,47 @@ const CoachPage: React.FC = () => {
   };
 
   const navigate = useNavigate();
-  const user = useMemo(() => {
-    try {
-      const raw = localStorage.getItem('user');
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  }, []);
+  const [user, setUser] = useState<any>(null);
+  const [onboardingStep1, setOnboardingStep1] = useState<any>(null);
 
-  const onboardingStep1 = useMemo(() => {
-    try {
-      const raw = localStorage.getItem('onboarding_step1');
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
+  // Load user and onboarding data
+  useEffect(() => {
+    const storedUser = (() => {
+      try {
+        const raw = localStorage.getItem('user');
+        return raw ? JSON.parse(raw) : null;
+      } catch {
+        return null;
+      }
+    })();
+    if (storedUser) {
+      setUser(storedUser);
     }
+    
+    // Load onboarding data for form users to get profile picture
+    const loadOnboardingData = async () => {
+      try {
+        const accessToken = localStorage.getItem('access_token');
+        if (!accessToken) return;
+        
+        const response = await fetch('/auth/onboarding/data', {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+          },
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data?.step1) {
+            setOnboardingStep1(data.step1);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load onboarding data:', error);
+      }
+    };
+    
+    loadOnboardingData();
   }, []);
 
   const handleLogout = () => {
