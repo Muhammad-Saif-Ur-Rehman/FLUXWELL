@@ -106,7 +106,34 @@ export const API_ENDPOINTS = {
     HEALTH: `${API_BASE_URL}/api/realtime/health`,
   },
   EXERCISES: `${API_BASE_URL}/exercises`,
-  
+  BLOG: {
+    POSTS: `${API_BASE_URL}/api/blog/posts`,
+    PUBLIC_POSTS: `${API_BASE_URL}/api/blog/public/posts`,
+    PUBLIC_POST: (id: string) => `${API_BASE_URL}/api/blog/public/posts/${id}`,
+    PUBLIC_SUMMARIZE: `${API_BASE_URL}/api/blog/public/summarize`,
+    POST: (id: string) => `${API_BASE_URL}/api/blog/posts/${id}`,
+    ANALYTICS: `${API_BASE_URL}/api/blog/analytics`,
+    INSIGHTS: `${API_BASE_URL}/api/blog/insights`,
+    TOPIC_SUGGESTIONS: `${API_BASE_URL}/api/blog/suggestions/topics`,
+    LIKE: (id: string) => `${API_BASE_URL}/api/blog/posts/${id}/like`,
+    LIKE_STATUS: (id: string) => `${API_BASE_URL}/api/blog/posts/${id}/like-status`,
+    COMMENTS: (id: string) => `${API_BASE_URL}/api/blog/posts/${id}/comments`,
+    COMMENT: (postId: string, commentId: string) => `${API_BASE_URL}/api/blog/posts/${postId}/comments/${commentId}`,
+    RELATED: (id: string) => `${API_BASE_URL}/api/blog/posts/${id}/related`,
+    EDITOR: {
+      GENERATE_OUTLINE: `${API_BASE_URL}/api/blog/editor/generate-outline`,
+      GENERATE_CONTENT: `${API_BASE_URL}/api/blog/editor/generate-content`,
+      OPTIMIZE_TITLE: `${API_BASE_URL}/api/blog/editor/optimize-title`,
+      IMPROVE_READABILITY: `${API_BASE_URL}/api/blog/editor/improve-readability`,
+      ADJUST_TONE: `${API_BASE_URL}/api/blog/editor/adjust-tone`,
+      GENERATE_META: `${API_BASE_URL}/api/blog/editor/generate-meta`,
+      TRANSLATE: `${API_BASE_URL}/api/blog/editor/translate`,
+      SUMMARIZE: `${API_BASE_URL}/api/blog/editor/summarize`,
+      SUGGEST_IMAGES: `${API_BASE_URL}/api/blog/editor/suggest-images`,
+      REGENERATE_SECTION: `${API_BASE_URL}/api/blog/editor/regenerate-section`,
+      ANALYZE: `${API_BASE_URL}/api/blog/editor/analyze`,
+    },
+  },
 } as const;
 
   

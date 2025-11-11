@@ -18,6 +18,10 @@ import AuthErrorPage from './pages/AuthErrorPage';
 import './App.css';
 import CoachPage from './pages/CoachPage';
 import ProgressPage from './pages/ProgressPage';
+import BlogPage from './pages/BlogPage';
+import BlogEditorPage from './pages/BlogEditorPage';
+import PublicFeedPage from './pages/PublicFeedPage';
+import BlogDetailPage from './pages/BlogDetailPage';
 
 // Simple auth guard for private routes
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -46,6 +50,11 @@ function App() {
         <Route path="/coach" element={<RequireAuth><CoachPage /></RequireAuth>} />
         <Route path="/realtime" element={<RequireAuth><RealtimePage /></RequireAuth>} />
         <Route path="/progress" element={<RequireAuth><ProgressPage /></RequireAuth>} />
+        <Route path="/blog" element={<RequireAuth><BlogPage /></RequireAuth>} />
+        <Route path="/blog/create" element={<RequireAuth><BlogEditorPage /></RequireAuth>} />
+        <Route path="/blog/edit/:id" element={<RequireAuth><BlogEditorPage /></RequireAuth>} />
+        <Route path="/blog/:id" element={<BlogDetailPage />} />
+        <Route path="/feed" element={<PublicFeedPage />} />
         <Route path="/auth-success" element={<AuthSuccessPage />} />
         <Route path="/auth-error" element={<AuthErrorPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -909,7 +909,7 @@ export default function NutritionPage() {
             <Link to="/realtime" className="text-gray-400 hover:text-white">Tracking</Link>
             <Link to="/coach" className="text-gray-400 hover:text-white">Coach</Link>
             <Link to="/progress" className="text-gray-400 hover:text-white">Progress</Link>
-            <a href="#" className="text-gray-400 hover:text-white">Blog</a>
+            <Link to="/blog" className="text-gray-400 hover:text-white">Blog</Link>
           </nav>
           <div className="flex items-center gap-3">
             <button

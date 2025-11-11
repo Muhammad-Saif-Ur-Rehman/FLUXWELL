@@ -523,7 +523,7 @@ const CoachPage: React.FC = () => {
             <Link to="/realtime" className="text-gray-400 hover:text-white">Tracking</Link>
             <Link to="/coach" className="text-[#EB4747] font-semibold">Coach</Link>
             <Link to="/progress" className="text-gray-400 hover:text-white">Progress</Link>
-            <a href="#" className="text-gray-400 hover:text-white">Blog</a>
+            <Link to="/blog" className="text-gray-400 hover:text-white">Blog</Link>
           </nav>
           <div className="flex items-center gap-3">
             <button onClick={handleLogout} className="hidden sm:inline px-3 py-2 rounded-lg border border-white/20 text-xs text-gray-300 hover:bg-white/10">Logout</button>

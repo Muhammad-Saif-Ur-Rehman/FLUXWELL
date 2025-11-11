@@ -320,7 +320,7 @@ const Dashboard: React.FC = () => {
             <Link to="/realtime" className="text-gray-400 hover:text-white">Tracking</Link>
             <Link to="/coach" className="text-gray-400 hover:text-white">Coach</Link>
             <Link to="/progress" className="text-gray-400 hover:text-white">Progress</Link>
-            <a href="#" className="text-gray-400 hover:text-white">Blog</a>
+            <Link to="/blog" className="text-gray-400 hover:text-white">Blog</Link>
           </nav>
           <div className="flex items-center gap-3">
             <button onClick={handleLogout} className="hidden sm:inline px-3 py-2 rounded-lg border border-white/20 text-xs text-gray-300 hover:bg-white/10">Logout</button>
@@ -554,7 +554,7 @@ const Dashboard: React.FC = () => {
               <div className="p-6">
                 <h3 className="text-[20px] font-bold mb-2">Featured AI Blog</h3>
                 <p className="text-sm text-gray-400 mb-4">Unlock your potential with our latest AI-driven insights. This week, we explore the science of muscle recovery and how to optimize your rest days for maximum gains.</p>
-                <button className="h-12 px-4 rounded-lg bg-[#EB4747] hover:bg-[#d13f3f] font-bold">Explore Blogs</button>
+                <button onClick={() => navigate('/blog')} className="h-12 px-4 rounded-lg bg-[#EB4747] hover:bg-[#d13f3f] font-bold">Explore Blogs</button>
               </div>
             </div>
           </section>

@@ -45,6 +45,9 @@ const Header: React.FC = () => {
           <Link to="/coach" className="text-white text-base font-medium font-['Lexend'] hover:text-[#EA2A2A] transition-colors duration-300">
             Coach
           </Link>
+          <Link to="/feed" className="text-white text-base font-medium font-['Lexend'] hover:text-[#EA2A2A] transition-colors duration-300">
+            Blogs
+          </Link>
           <a href="#" className="text-white text-base font-medium font-['Lexend'] hover:text-[#EA2A2A] transition-colors duration-300">
             Contact
           </a>

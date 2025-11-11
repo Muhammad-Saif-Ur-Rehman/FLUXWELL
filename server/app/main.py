@@ -18,6 +18,7 @@ from app.routers import realtime  # path: app/routers/realtime.py
 from app.routers import ai_realtime  # path: app/routers/ai_realtime.py
 from app.routers.fluxie_chat_langgraph import router as fluxie_router
 from app.routers.nutrition import router as nutrition_router
+from app.routers import blog
 
 load_dotenv()
 
@@ -77,6 +78,7 @@ app.include_router(ai_realtime.router)
 app.include_router(progress_enhanced.router)
 app.include_router(fluxie_router)
 app.include_router(nutrition_router)
+app.include_router(blog.router)
 
 @app.on_event("startup")
 def _app_startup():
